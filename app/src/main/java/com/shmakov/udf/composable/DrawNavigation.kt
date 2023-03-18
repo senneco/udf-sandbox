@@ -1,62 +1,55 @@
 package com.shmakov.udf.composable
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import com.shmakov.udf.Destination
 import com.shmakov.udf.composable.screen.AccountsScreen
 import com.shmakov.udf.composable.screen.CardsScreen
 import com.shmakov.udf.composable.screen.HomeScreen
 import com.shmakov.udf.composable.screen.TransactionsScreen
-import com.shmakov.udf.navigation.Screen
-import java.util.concurrent.atomic.AtomicLong
+import com.shmakov.udf.navigation.*
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun AnimatedNavGraph(destination: Destination, into: Long?) {
-    val lastPath = remember {
-        AtomicLong(destination.id)
-    }
+fun AnimatedNavigation(navState: NavState, into: Destination?) {
+    val rootDestination = navState.backStack.firstOrNull() ?: return
 
-    var isPop = lastPath.get() != destination.id
+    lateinit var lastScreen: Screen
+    var lastContentIndex = 0
 
-    var screen = getScreen(destination)
+    val targetDestination = navState.backStack
+        .foldIndexed<Destination, Destination?>(null) { index, lastShownDestination, nextDestination ->
+            val result = if (lastShownDestination == null) {
+                nextDestination
+            } else if (lastScreen.whereToShowChild(nextDestination) == into) {
+                lastContentIndex = index
 
-    var targetDestination = destination
+                nextDestination
+            } else {
+                lastShownDestination
+            }
 
-    var nextDestination = destination
-    while (nextDestination.childDestination != null) {
-        nextDestination = nextDestination.childDestination!!
+            lastScreen = getScreen(nextDestination)
 
-        if (nextDestination.id == lastPath.get()) {
-            isPop = false
-        }
-
-        if (screen.whereToShowChild() == into) {
-            screen = getScreen(nextDestination)
-            targetDestination = nextDestination
-        }
-    }
-
-    lastPath.set(screen.destination.id)
+            result
+        } ?: rootDestination
 
     val finalEnter: AnimatedContentScope<Destination>.() -> EnterTransition = {
-        if (isPop) {
-            appPopEnterTransition
-        } else {
-            appEnterTransition
+        when (navState.lastNavActionType) {
+            NavActionType.Push -> appPushEnterTransition
+            NavActionType.Pop -> appPopEnterTransition
+            NavActionType.Replace -> appReplaceEnterTransition
         }
     }
 
     val finalExit: AnimatedContentScope<Destination>.() -> ExitTransition = {
-        if (isPop) {
-            appPopExitTransition
-        } else {
-            appExitTransition
+        when (navState.lastNavActionType) {
+            NavActionType.Push -> appPushExitTransition
+            NavActionType.Pop -> appPopExitTransition
+            NavActionType.Replace -> appReplaceExitTransition
         }
     }
 
@@ -70,19 +63,23 @@ fun AnimatedNavGraph(destination: Destination, into: Long?) {
                 finalExit(),
             )
         },
-        contentKey = { it.id }
+        contentKey = { it }
     ) {
-        getScreen(it).content()
+        val nestedNavState = navState.copy(
+            backStack = navState.backStack.drop(lastContentIndex + 1)
+        )
+
+        getScreen(it).Content(nestedNavState)
     }
 
 }
 
 private fun getScreen(destination: Destination): Screen {
-    val result = when (destination.name) {
-        "Home" -> HomeScreen(destination)
-        "Accounts" -> AccountsScreen(destination)
-        "Transactions" -> TransactionsScreen(destination)
-        "Cards" -> CardsScreen(destination)
+    val result = when (destination) {
+        Home -> HomeScreen(destination)
+        Accounts -> AccountsScreen(destination)
+        Transactions -> TransactionsScreen(destination)
+        Cards -> CardsScreen(destination)
         else -> null
     }
 
@@ -90,7 +87,7 @@ private fun getScreen(destination: Destination): Screen {
 }
 
 @OptIn(ExperimentalAnimationApi::class)
-private val AnimatedContentScope<*>.appEnterTransition: EnterTransition
+private val AnimatedContentScope<*>.appPushEnterTransition: EnterTransition
     get() {
         return slideIntoContainer(
             AnimatedContentScope.SlideDirection.Left,
@@ -99,7 +96,7 @@ private val AnimatedContentScope<*>.appEnterTransition: EnterTransition
     }
 
 @OptIn(ExperimentalAnimationApi::class)
-private val AnimatedContentScope<*>.appExitTransition: ExitTransition
+private val AnimatedContentScope<*>.appPushExitTransition: ExitTransition
     get() {
         return slideOutOfContainer(
             AnimatedContentScope.SlideDirection.Left,
@@ -121,6 +118,20 @@ private val AnimatedContentScope<*>.appPopExitTransition: ExitTransition
     get() {
         return slideOutOfContainer(
             AnimatedContentScope.SlideDirection.Right,
+            animationSpec = tween()
+        )
+    }
+
+private val appReplaceEnterTransition: EnterTransition
+    get() {
+        return fadeIn(
+            animationSpec = tween()
+        )
+    }
+
+private val appReplaceExitTransition: ExitTransition
+    get() {
+        return fadeOut(
             animationSpec = tween()
         )
     }

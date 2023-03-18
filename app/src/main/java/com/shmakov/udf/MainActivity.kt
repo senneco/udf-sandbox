@@ -11,7 +11,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.shmakov.udf.UdfApp.Companion.appState
-import com.shmakov.udf.composable.AnimatedNavGraph
+import com.shmakov.udf.composable.AnimatedNavigation
+import com.shmakov.udf.navigation.NavActionType
 import com.shmakov.udf.ui.theme.UDFTheme
 
 class MainActivity : ComponentActivity() {
@@ -21,10 +22,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
 
-            BackHandler(enabled = appState.destination.childDestination != null) {
+            BackHandler(enabled = appState.navState.backStack.size > 1) {
                 appState = appState.copy(
-                    destination = appState.destination.copy(
-                        childDestination = null
+                    navState = appState.navState.copy(
+                        backStack = appState.navState.backStack.dropLast(1),
+                        lastNavActionType = NavActionType.Pop,
                     )
                 )
             }
@@ -45,6 +47,6 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalAnimationApi::class)
     @Composable
     private fun AppContent(appState: AppState) {
-        AnimatedNavGraph(appState.destination, null)
+        AnimatedNavigation(appState.navState, null)
     }
 }

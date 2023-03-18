@@ -9,13 +9,12 @@ import androidx.compose.ui.graphics.Color
 import timber.log.Timber
 
 @Composable
-fun AccountsScreenContent(
-    destination: Destination,
-) {
+fun AccountsScreenContent() {
     Timber.i("***-*** draw Accounts Screen")
 
     Text(
-        text = "Accounts Screen", modifier = Modifier
+        text = "Accounts Screen",
+        modifier = Modifier
             .fillMaxSize()
             .background(color = Color.Green)
     )

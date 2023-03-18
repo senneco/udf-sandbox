@@ -1,24 +1,23 @@
-package com.shmakov.udf
+package com.shmakov.udf.composable.content
 
-import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.shmakov.udf.UdfApp.Companion.appState
-import com.shmakov.udf.composable.AnimatedNavGraph
+import com.shmakov.udf.composable.AnimatedNavigation
+import com.shmakov.udf.navigation.*
 import timber.log.Timber
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreenContent(
     destination: Destination,
+    nestedNavState: NavState,
 ) {
     Timber.i("***-*** draw Home Screen")
 
@@ -31,12 +30,9 @@ fun HomeScreenContent(
 
         Button(onClick = {
             appState = appState.copy(
-                destination = destination.copy(
-                    childDestination = Destination(
-                        id = 1,
-                        name = "Accounts",
-                        childDestination = null,
-                    )
+                navState = appState.navState.copy(
+                    backStack = appState.navState.backStack.takeWhile { it != destination } + destination + Accounts,
+                    lastNavActionType = NavActionType.Push,
                 )
             )
         }) {
@@ -45,12 +41,9 @@ fun HomeScreenContent(
 
         Button(onClick = {
             appState = appState.copy(
-                destination = destination.copy(
-                    childDestination = Destination(
-                        id = 2,
-                        name = "Transactions",
-                        childDestination = null,
-                    )
+                navState = appState.navState.copy(
+                    backStack = appState.navState.backStack.takeWhile { it != destination } + destination + Transactions,
+                    lastNavActionType = NavActionType.Push,
                 )
             )
         }) {
@@ -59,12 +52,9 @@ fun HomeScreenContent(
 
         Button(onClick = {
             appState = appState.copy(
-                destination = destination.copy(
-                    childDestination = Destination(
-                        id = 3,
-                        name = "Cards",
-                        childDestination = null,
-                    )
+                navState = appState.navState.copy(
+                    backStack = appState.navState.backStack.takeWhile { it != destination } + destination + Cards,
+                    lastNavActionType = NavActionType.Push,
                 )
             )
         }) {
@@ -75,8 +65,8 @@ fun HomeScreenContent(
             appState = appState.copy(showInPlace = it)
         })
 
-        if (appState.showInPlace && destination.childDestination != null) {
-            AnimatedNavGraph(destination = destination.childDestination, into = destination.id)
+        if (nestedNavState.backStack.isNotEmpty()) {
+            AnimatedNavigation(navState = nestedNavState, into = destination)
         }
     }
 }
