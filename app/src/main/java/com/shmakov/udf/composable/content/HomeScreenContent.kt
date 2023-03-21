@@ -12,15 +12,12 @@ import androidx.compose.ui.graphics.Color
 import com.shmakov.udf.UdfApp.Companion.appState
 import com.shmakov.udf.composable.AnimatedNavigation
 import com.shmakov.udf.navigation.*
-import timber.log.Timber
 
 @Composable
 fun HomeScreenContent(
     destination: Destination,
     nestedNavState: NavState,
 ) {
-    Timber.i("***-*** draw Home Screen")
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -28,36 +25,17 @@ fun HomeScreenContent(
     ) {
         Text(text = "Home Screen")
 
-        Button(onClick = {
-            appState = appState.copy(
-                navState = appState.navState.copy(
-                    backStack = appState.navState.backStack.takeWhile { it != destination } + destination + Accounts,
-                    lastNavActionType = NavActionType.Push,
-                )
-            )
-        }) {
+        Button(onClick = { navigateTo(Accounts) }) {
             Text(text = "Go to Accounts")
         }
 
-        Button(onClick = {
-            appState = appState.copy(
-                navState = appState.navState.copy(
-                    backStack = appState.navState.backStack.takeWhile { it != destination } + destination + Transactions,
-                    lastNavActionType = NavActionType.Push,
-                )
-            )
-        }) {
+        Button(
+            onClick = { navigateTo(Transactions) },
+        ) {
             Text(text = "Go to Transactions")
         }
 
-        Button(onClick = {
-            appState = appState.copy(
-                navState = appState.navState.copy(
-                    backStack = appState.navState.backStack.takeWhile { it != destination } + destination + Cards,
-                    lastNavActionType = NavActionType.Push,
-                )
-            )
-        }) {
+        Button(onClick = { navigateTo(Cards) }) {
             Text(text = "Go to Cards")
         }
 
@@ -69,4 +47,23 @@ fun HomeScreenContent(
             AnimatedNavigation(navState = nestedNavState, into = destination)
         }
     }
+}
+
+private fun navigateTo(
+    destination: Destination,
+) {
+    val currentDestinationIndex = appState.navState.backStack.indexOf(destination)
+
+    val navActionType = if (currentDestinationIndex == appState.navState.backStack.lastIndex) {
+        NavActionType.Push
+    } else {
+        NavActionType.Replace
+    }
+
+    appState = appState.copy(
+        navState = appState.navState.copy(
+            backStack = appState.navState.backStack.take(currentDestinationIndex + 1) + destination,
+            lastNavActionType = navActionType,
+        )
+    )
 }

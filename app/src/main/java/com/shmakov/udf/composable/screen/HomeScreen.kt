@@ -1,8 +1,9 @@
 package com.shmakov.udf.composable.screen
 
+import android.content.res.Configuration
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalConfiguration
 import com.shmakov.udf.composable.content.HomeScreenContent
-import com.shmakov.udf.UdfApp.Companion.appState
 import com.shmakov.udf.navigation.Destination
 import com.shmakov.udf.navigation.NavState
 import com.shmakov.udf.navigation.Screen
@@ -10,12 +11,18 @@ import com.shmakov.udf.navigation.Screen
 class HomeScreen(destination: Destination) : Screen(destination) {
 
     @Composable
-    override fun whereToShowChild(childDestination: Destination): Destination? {
-        return if (appState.showInPlace) {
+    override fun whereToShowChild(
+        whereShowCurrentDestination: Destination?,
+        childDestination: Destination
+    ): Destination? {
+        val configuration = LocalConfiguration.current
+
+        val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+        return if (isLandscape) {
             destination
         } else {
-            // There should be parent container of home screen! Not the null!
-            null
+            whereShowCurrentDestination
         }
     }
 

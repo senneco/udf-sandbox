@@ -7,7 +7,10 @@ abstract class Screen(
 ) {
 
     @Composable
-    open fun whereToShowChild(childDestination: Destination): Destination? {
+    open fun whereToShowChild(
+        whereShowCurrentDestination: Destination?,
+        childDestination: Destination,
+    ): Destination? {
         return null
     }
 

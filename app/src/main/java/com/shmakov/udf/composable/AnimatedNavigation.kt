@@ -19,17 +19,24 @@ fun AnimatedNavigation(navState: NavState, into: Destination?) {
 
     lateinit var lastScreen: Screen
     var lastContentIndex = 0
+    var childDestination = into
 
     val targetDestination = navState.backStack
         .foldIndexed<Destination, Destination?>(null) { index, lastShownDestination, nextDestination ->
             val result = if (lastShownDestination == null) {
                 nextDestination
-            } else if (lastScreen.whereToShowChild(nextDestination) == into) {
-                lastContentIndex = index
-
-                nextDestination
             } else {
-                lastShownDestination
+                childDestination = lastScreen.whereToShowChild(
+                    whereShowCurrentDestination = childDestination,
+                    childDestination = nextDestination,
+                )
+                if (childDestination == into) {
+                    lastContentIndex = index
+
+                    nextDestination
+                } else {
+                    lastShownDestination
+                }
             }
 
             lastScreen = getScreen(nextDestination)
