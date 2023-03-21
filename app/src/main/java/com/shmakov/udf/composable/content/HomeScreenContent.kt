@@ -15,7 +15,7 @@ import com.shmakov.udf.navigation.*
 
 @Composable
 fun HomeScreenContent(
-    destination: Destination,
+    currentDestination: Destination,
     nestedNavState: NavState,
 ) {
     Column(
@@ -25,17 +25,17 @@ fun HomeScreenContent(
     ) {
         Text(text = "Home Screen")
 
-        Button(onClick = { navigateTo(Accounts) }) {
+        Button(onClick = { navigateTo(currentDestination, Accounts) }) {
             Text(text = "Go to Accounts")
         }
 
         Button(
-            onClick = { navigateTo(Transactions) },
+            onClick = { navigateTo(currentDestination, Transactions) },
         ) {
             Text(text = "Go to Transactions")
         }
 
-        Button(onClick = { navigateTo(Cards) }) {
+        Button(onClick = { navigateTo(currentDestination, Cards) }) {
             Text(text = "Go to Cards")
         }
 
@@ -44,15 +44,16 @@ fun HomeScreenContent(
         })
 
         if (nestedNavState.backStack.isNotEmpty()) {
-            AnimatedNavigation(navState = nestedNavState, into = destination)
+            AnimatedNavigation(navState = nestedNavState, into = currentDestination)
         }
     }
 }
 
 private fun navigateTo(
-    destination: Destination,
+    currentDestination: Destination,
+    targetDestination: Destination,
 ) {
-    val currentDestinationIndex = appState.navState.backStack.indexOf(destination)
+    val currentDestinationIndex = appState.navState.backStack.indexOf(currentDestination)
 
     val navActionType = if (currentDestinationIndex == appState.navState.backStack.lastIndex) {
         NavActionType.Push
@@ -62,7 +63,7 @@ private fun navigateTo(
 
     appState = appState.copy(
         navState = appState.navState.copy(
-            backStack = appState.navState.backStack.take(currentDestinationIndex + 1) + destination,
+            backStack = appState.navState.backStack.take(currentDestinationIndex + 1) + targetDestination,
             lastNavActionType = navActionType,
         )
     )
