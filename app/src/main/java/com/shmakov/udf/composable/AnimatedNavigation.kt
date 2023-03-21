@@ -4,12 +4,15 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SheetValue
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.shmakov.udf.composable.screen.*
 import com.shmakov.udf.navigation.*
+import java.util.concurrent.atomic.AtomicReference
 
-@OptIn(ExperimentalAnimationApi::class)
+@OptIn(ExperimentalAnimationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun AnimatedNavigation(navState: NavState, into: Destination) {
     val rootDestination = navState.backStack.firstOrNull() ?: return
@@ -38,7 +41,12 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
                 lastShownDestination
             }
 
-            lastScreen = getScreen(nextDestination)
+            // TODO: make one interface for content and modal screens
+            lastScreen = if (nextDestination is Destination.Content) {
+                getContentScreen(nextDestination)
+            } else {
+                lastScreen
+            }
 
             result
         } ?: rootDestination
@@ -75,22 +83,61 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
             backStack = navState.backStack.drop(lastContentIndex + 1)
         )
 
-        getScreen(it).Content(nestedNavState)
+        getContentScreen(it).Content(nestedNavState)
 
-        for (i in lastContentIndex + 1..navState.backStack.lastIndex) {
-            val screen = getScreen(navState.backStack[i])
-            screen.Content(NavState(emptyList(), NavActionType.Push))
+        val modalDestinations = navState.backStack
+            .drop(lastContentIndex)
+            .filterIsInstance<Destination.Modal>()
+
+        val rememberedModalDestinations =
+            remember { AtomicReference(emptyList<Destination.Modal>()) }
+
+        val itemsToRemove = rememberedModalDestinations.get() - modalDestinations
+
+        itemsToRemove.forEach { itemToRemove ->
+            val screen = getModalScreen(itemToRemove)
+
+            screen.Content(
+                targetState = SheetValue.Hidden,
+                nestedNavState = NavState(
+                    emptyList(), NavActionType.Pop
+                )
+            )
         }
+
+        val itemsToAdd = modalDestinations - rememberedModalDestinations.get()
+
+        itemsToAdd.forEach { itemToAdd ->
+            val screen = getModalScreen(itemToAdd)
+
+            screen.Content(
+                targetState = SheetValue.Expanded,
+                nestedNavState = NavState(
+                    emptyList(), NavActionType.Push
+                )
+            )
+        }
+
+        // TODO: remove redundant items
+        rememberedModalDestinations.set(modalDestinations)
     }
 
 }
 
-private fun getScreen(destination: Destination): Screen {
+private fun getContentScreen(destination: Destination): Screen {
     val result = when (destination) {
         is Home -> HomeScreen(destination)
         is Accounts -> AccountsScreen(destination)
         is Transactions -> TransactionsScreen(destination)
         is Cards -> CardsScreen(destination)
+        else -> null
+    }
+
+    return result!!
+}
+
+private fun getModalScreen(destination: Destination): ModalScreen {
+    val result = when (destination) {
         is Account -> AccountScreen(destination)
         else -> null
     }

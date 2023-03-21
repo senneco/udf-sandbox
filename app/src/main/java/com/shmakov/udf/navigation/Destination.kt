@@ -1,24 +1,28 @@
 package com.shmakov.udf.navigation
 
-interface Destination {
+private var nextId = 0
 
-    interface Content : Destination
+open class Destination {
 
-    interface Modal : Destination
+    private val id = nextId++
+
+    open class Content : Destination()
+
+    open class Modal : Destination()
 }
 
-object AppRoot : Destination.Content
+object AppRoot : Destination.Content()
 
-object Home : Destination.Content
+object Home : Destination.Content()
 
-object Accounts : Destination.Content
+object Accounts : Destination.Content()
 
-data class Account(val id: Int) : Destination.Modal
+data class Account(val id: Int) : Destination.Modal()
 
-object Transactions : Destination.Content
+object Transactions : Destination.Content()
 
-data class Transaction(val id: Int) : Destination.Content
+data class Transaction(val id: Int) : Destination.Content()
 
-object Cards : Destination.Content
+object Cards : Destination.Content()
 
-data class Card(val id: Int) : Destination.Content
+data class Card(val id: Int) : Destination.Content()

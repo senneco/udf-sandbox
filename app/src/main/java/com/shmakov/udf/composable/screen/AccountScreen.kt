@@ -4,24 +4,39 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.shmakov.udf.UdfApp.Companion.appState
-import com.shmakov.udf.navigation.Account
-import com.shmakov.udf.navigation.NavActionType
-import com.shmakov.udf.navigation.NavState
-import com.shmakov.udf.navigation.Screen
+import com.shmakov.udf.navigation.*
+import kotlinx.coroutines.launch
 
 class AccountScreen(
     override val destination: Account
-) : Screen(destination) {
+) : ModalScreen(destination) {
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    override fun Content(nestedNavState: NavState) {
+    override fun Content(nestedNavState: NavState, targetState: SheetValue) {
+        val coroutineScope = rememberCoroutineScope()
         val sheetState = rememberModalBottomSheetState(
             skipPartiallyExpanded = true,
         )
+
+        if (targetState == SheetValue.Hidden) {
+            if (sheetState.currentValue == targetState) {
+                // TODO: if not return, then same bottom sheet will be shown
+                return
+            }
+
+            LaunchedEffect(SheetValue.Hidden) {
+                coroutineScope.launch { sheetState.expand() }
+            }
+        } else {
+            LaunchedEffect(SheetValue.Expanded) {
+                coroutineScope.launch { sheetState.hide() }
+            }
+        }
 
         ModalBottomSheet(
             onDismissRequest = {
@@ -46,7 +61,7 @@ class AccountScreen(
                 Button(onClick = {
                     appState = appState.copy(
                         navState = appState.navState.copy(
-                            backStack = appState.navState.backStack + Account(2),
+                            backStack = appState.navState.backStack.dropLast(1) + Account(2),
                             lastNavActionType = NavActionType.Push,
                         )
                     )
