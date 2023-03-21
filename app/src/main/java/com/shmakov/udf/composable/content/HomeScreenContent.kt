@@ -1,7 +1,9 @@
 package com.shmakov.udf.composable.content
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -9,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import com.shmakov.udf.UdfApp.Companion.appState
 import com.shmakov.udf.composable.AnimatedNavigation
 import com.shmakov.udf.navigation.*
@@ -25,23 +28,19 @@ fun HomeScreenContent(
     ) {
         Text(text = "Home Screen")
 
-        Button(onClick = { navigateTo(currentDestination, Accounts) }) {
-            Text(text = "Go to Accounts")
-        }
+        val configuration = LocalConfiguration.current
 
-        Button(
-            onClick = { navigateTo(currentDestination, Transactions) },
-        ) {
-            Text(text = "Go to Transactions")
-        }
+        val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-        Button(onClick = { navigateTo(currentDestination, Cards) }) {
-            Text(text = "Go to Cards")
+        if (isLandscape) {
+            Row {
+                Buttons(currentDestination = currentDestination)
+            }
+        } else {
+            Column {
+                Buttons(currentDestination = currentDestination)
+            }
         }
-
-        Checkbox(checked = appState.showInPlace, onCheckedChange = {
-            appState = appState.copy(showInPlace = it)
-        })
 
         if (nestedNavState.backStack.isNotEmpty()) {
             AnimatedNavigation(navState = nestedNavState, into = currentDestination)
@@ -49,6 +48,26 @@ fun HomeScreenContent(
     }
 }
 
+@Composable
+fun Buttons(
+    currentDestination: Destination,
+) {
+    Button(onClick = { navigateTo(currentDestination, Accounts) }) {
+        Text(text = "Go to Accounts")
+    }
+
+    Button(
+        onClick = { navigateTo(currentDestination, Transactions) },
+    ) {
+        Text(text = "Go to Transactions")
+    }
+
+    Button(onClick = { navigateTo(currentDestination, Cards) }) {
+        Text(text = "Go to Cards")
+    }
+}
+
+// TODO: move to reducer
 private fun navigateTo(
     currentDestination: Destination,
     targetDestination: Destination,

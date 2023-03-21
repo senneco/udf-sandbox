@@ -8,10 +8,10 @@ abstract class Screen(
 
     @Composable
     open fun whereToShowChild(
-        whereShowCurrentDestination: Destination?,
+        whereShowCurrentDestination: Destination,
         childDestination: Destination,
-    ): Destination? {
-        return null
+    ): Destination {
+        return AppRoot
     }
 
     @Composable

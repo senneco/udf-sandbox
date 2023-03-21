@@ -14,7 +14,7 @@ import com.shmakov.udf.navigation.*
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun AnimatedNavigation(navState: NavState, into: Destination?) {
+fun AnimatedNavigation(navState: NavState, into: Destination) {
     val rootDestination = navState.backStack.firstOrNull() ?: return
 
     lateinit var lastScreen: Screen

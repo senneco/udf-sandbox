@@ -1,23 +1,26 @@
 package com.shmakov.udf.navigation
 
-import java.util.concurrent.atomic.AtomicLong
+interface Destination {
 
-abstract class Destination {
-    val destinationId: Long = generateDestinationId()
+    interface Content : Destination
+
+    interface Dialog : Destination
+
+    interface BottomSheet : Destination
 }
 
-private val lastIndex = AtomicLong(0)
+object AppRoot: Destination.Content
 
-fun generateDestinationId(): Long = lastIndex.getAndIncrement()
+object Home : Destination.Content
 
-object Home : Destination()
+object Accounts : Destination.Content
 
-object Accounts : Destination()
+data class Account(val id: Long) : Destination.Content
 
-data class Account(val id: Long) : Destination()
+object Transactions : Destination.Content
 
-object Transactions : Destination()
-data class Transaction(val id: Long) : Destination()
+data class Transaction(val id: Long) : Destination.Content
 
-object Cards : Destination()
-data class Card(val id: Long) : Destination()
+object Cards : Destination.Content
+
+data class Card(val id: Long) : Destination.Content

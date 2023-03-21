@@ -4,7 +4,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -13,6 +12,7 @@ import androidx.compose.ui.Modifier
 import com.shmakov.udf.UdfApp.Companion.appState
 import com.shmakov.udf.composable.AnimatedNavigation
 import com.shmakov.udf.navigation.NavActionType
+import com.shmakov.udf.navigation.AppRoot
 import com.shmakov.udf.ui.theme.UDFTheme
 
 class MainActivity : ComponentActivity() {
@@ -44,9 +44,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @OptIn(ExperimentalAnimationApi::class)
     @Composable
     private fun AppContent(appState: AppState) {
-        AnimatedNavigation(appState.navState, null)
+        AnimatedNavigation(appState.navState, AppRoot)
     }
 }

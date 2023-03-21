@@ -12,9 +12,9 @@ class HomeScreen(destination: Destination) : Screen(destination) {
 
     @Composable
     override fun whereToShowChild(
-        whereShowCurrentDestination: Destination?,
+        whereShowCurrentDestination: Destination,
         childDestination: Destination
-    ): Destination? {
+    ): Destination {
         val configuration = LocalConfiguration.current
 
         val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
