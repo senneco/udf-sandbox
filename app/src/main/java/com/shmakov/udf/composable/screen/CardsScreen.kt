@@ -1,7 +1,7 @@
 package com.shmakov.udf.composable.screen
 
 import androidx.compose.runtime.Composable
-import com.shmakov.udf.CardsScreenContent
+import com.shmakov.udf.composable.content.CardsScreenContent
 import com.shmakov.udf.navigation.Cards
 import com.shmakov.udf.navigation.NavState
 import com.shmakov.udf.navigation.Screen

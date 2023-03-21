@@ -4,9 +4,7 @@ interface Destination {
 
     interface Content : Destination
 
-    interface Dialog : Destination
-
-    interface BottomSheet : Destination
+    interface Modal : Destination
 }
 
 object AppRoot : Destination.Content
@@ -15,7 +13,7 @@ object Home : Destination.Content
 
 object Accounts : Destination.Content
 
-data class Account(val id: Int) : Destination.BottomSheet
+data class Account(val id: Int) : Destination.Modal
 
 object Transactions : Destination.Content
 
