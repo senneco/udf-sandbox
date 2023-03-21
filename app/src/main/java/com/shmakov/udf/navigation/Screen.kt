@@ -3,7 +3,7 @@ package com.shmakov.udf.navigation
 import androidx.compose.runtime.Composable
 
 abstract class Screen(
-    val destination: Destination,
+    open val destination: Destination,
 ) {
 
     @Composable

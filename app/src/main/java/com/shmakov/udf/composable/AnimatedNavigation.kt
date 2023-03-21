@@ -6,10 +6,7 @@ import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import com.shmakov.udf.composable.screen.AccountsScreen
-import com.shmakov.udf.composable.screen.CardsScreen
-import com.shmakov.udf.composable.screen.HomeScreen
-import com.shmakov.udf.composable.screen.TransactionsScreen
+import com.shmakov.udf.composable.screen.*
 import com.shmakov.udf.navigation.*
 
 @OptIn(ExperimentalAnimationApi::class)
@@ -25,7 +22,7 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
         .foldIndexed<Destination, Destination?>(null) { index, lastShownDestination, nextDestination ->
             val result = if (lastShownDestination == null) {
                 nextDestination
-            } else {
+            } else if (nextDestination is Destination.Content) {
                 childDestination = lastScreen.whereToShowChild(
                     whereShowCurrentDestination = childDestination,
                     childDestination = nextDestination,
@@ -37,6 +34,8 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
                 } else {
                     lastShownDestination
                 }
+            } else {
+                lastShownDestination
             }
 
             lastScreen = getScreen(nextDestination)
@@ -77,16 +76,22 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
         )
 
         getScreen(it).Content(nestedNavState)
+
+        for (i in lastContentIndex + 1..navState.backStack.lastIndex) {
+            val screen = getScreen(navState.backStack[i])
+            screen.Content(NavState(emptyList(), NavActionType.Push))
+        }
     }
 
 }
 
 private fun getScreen(destination: Destination): Screen {
     val result = when (destination) {
-        Home -> HomeScreen(destination)
-        Accounts -> AccountsScreen(destination)
-        Transactions -> TransactionsScreen(destination)
-        Cards -> CardsScreen(destination)
+        is Home -> HomeScreen(destination)
+        is Accounts -> AccountsScreen(destination)
+        is Transactions -> TransactionsScreen(destination)
+        is Cards -> CardsScreen(destination)
+        is Account -> AccountScreen(destination)
         else -> null
     }
 

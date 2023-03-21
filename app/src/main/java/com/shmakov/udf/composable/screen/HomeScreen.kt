@@ -5,10 +5,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalConfiguration
 import com.shmakov.udf.composable.content.HomeScreenContent
 import com.shmakov.udf.navigation.Destination
+import com.shmakov.udf.navigation.Home
 import com.shmakov.udf.navigation.NavState
 import com.shmakov.udf.navigation.Screen
 
-class HomeScreen(destination: Destination) : Screen(destination) {
+class HomeScreen(
+    override val destination: Home
+) : Screen(destination) {
 
     @Composable
     override fun whereToShowChild(
