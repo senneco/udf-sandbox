@@ -17,7 +17,11 @@ class AccountScreen(
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    override fun Content(nestedNavState: NavState, targetState: SheetValue) {
+    override fun Content(
+        nestedNavState: NavState,
+        targetState: SheetValue,
+        onHide: () -> Unit,
+    ) {
         val coroutineScope = rememberCoroutineScope()
         val sheetState = rememberModalBottomSheetState(
             skipPartiallyExpanded = true,
@@ -25,16 +29,16 @@ class AccountScreen(
 
         if (targetState == SheetValue.Hidden) {
             if (sheetState.currentValue == targetState) {
-                // TODO: if not return, then same bottom sheet will be shown
+                onHide()
                 return
             }
 
             LaunchedEffect(SheetValue.Hidden) {
-                coroutineScope.launch { sheetState.expand() }
+                coroutineScope.launch { sheetState.hide() }
             }
         } else {
             LaunchedEffect(SheetValue.Expanded) {
-                coroutineScope.launch { sheetState.hide() }
+                coroutineScope.launch { sheetState.expand() }
             }
         }
 
@@ -69,10 +73,17 @@ class AccountScreen(
                     Text(text = "Go to next")
                 }
             }
-        }
 
-        LaunchedEffect(Unit) {
-            sheetState.expand()
+            Button(onClick = {
+                appState = appState.copy(
+                    navState = appState.navState.copy(
+                        backStack = appState.navState.backStack.dropLast(1) + AccountDetails(destination.id),
+                        lastNavActionType = NavActionType.Push,
+                    )
+                )
+            }) {
+                Text(text = "Go to details")
+            }
         }
     }
 }

@@ -21,5 +21,6 @@ abstract class ModalScreen(
     abstract fun Content(
         nestedNavState: NavState,
         targetState: SheetValue,
+        onHide: () -> Unit,
     )
 }

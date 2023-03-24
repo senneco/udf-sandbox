@@ -19,6 +19,8 @@ object Accounts : Destination.Content()
 
 data class Account(val id: Int) : Destination.Modal()
 
+data class AccountDetails(val id: Int) : Destination.Content()
+
 object Transactions : Destination.Content()
 
 data class Transaction(val id: Int) : Destination.Content()

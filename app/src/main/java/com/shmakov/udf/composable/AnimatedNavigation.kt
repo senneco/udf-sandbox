@@ -96,32 +96,45 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
 
         itemsToRemove.forEach { itemToRemove ->
             val screen = getModalScreen(itemToRemove)
+            key(itemToRemove) {
 
-            screen.Content(
-                targetState = SheetValue.Hidden,
-                nestedNavState = NavState(
-                    emptyList(), NavActionType.Pop
+                screen.Content(
+                    targetState = SheetValue.Hidden,
+                    nestedNavState = NavState(
+                        emptyList(), NavActionType.Pop
+                    ),
+                    onHide = {
+                        rememberedModalDestinations.getAndUpdate { items ->
+                            items - itemToRemove
+                        }
+                    },
                 )
-            )
+            }
         }
 
         val itemsToAdd = modalDestinations - rememberedModalDestinations.get()
 
         itemsToAdd.forEach { itemToAdd ->
             val screen = getModalScreen(itemToAdd)
+            key(itemToAdd) {
 
-            screen.Content(
-                targetState = SheetValue.Expanded,
-                nestedNavState = NavState(
-                    emptyList(), NavActionType.Push
+                screen.Content(
+                    targetState = SheetValue.Expanded,
+                    nestedNavState = NavState(
+                        emptyList(), NavActionType.Push
+                    ),
+                    onHide = {
+                        rememberedModalDestinations.getAndUpdate { items ->
+                            items - itemToAdd
+                        }
+                    },
                 )
-            )
+            }
         }
 
         // TODO: remove redundant items
         rememberedModalDestinations.set(modalDestinations)
     }
-
 }
 
 private fun getContentScreen(destination: Destination): Screen {
@@ -130,6 +143,7 @@ private fun getContentScreen(destination: Destination): Screen {
         is Accounts -> AccountsScreen(destination)
         is Transactions -> TransactionsScreen(destination)
         is Cards -> CardsScreen(destination)
+        is AccountDetails -> AccountDetailsScreen(destination)
         else -> null
     }
 

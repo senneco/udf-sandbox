@@ -16,7 +16,12 @@ class UdfApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        Timber.plant(DebugTree())
+        Timber.plant(object: DebugTree() {
+
+            override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+                super.log(priority, "Timber:UDF", message, t)
+            }
+        })
     }
 
     companion object {
