@@ -4,10 +4,7 @@ import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.shmakov.udf.navigation.Accounts
-import com.shmakov.udf.navigation.Home
-import com.shmakov.udf.navigation.NavActionType
-import com.shmakov.udf.navigation.NavState
+import com.shmakov.udf.navigation.*
 import timber.log.Timber
 import timber.log.Timber.DebugTree
 
@@ -28,7 +25,7 @@ class UdfApp : Application() {
         var appState by mutableStateOf(
             AppState(
                 navState = NavState(
-                    listOf(Home, Accounts),
+                    listOf(Home, Accounts, Account(1)),
                     lastNavActionType = NavActionType.Replace,
                 ),
                 showInPlace = false,

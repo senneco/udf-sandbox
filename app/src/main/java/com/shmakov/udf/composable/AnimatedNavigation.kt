@@ -4,8 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.SheetValue
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.shmakov.udf.composable.screen.*
@@ -78,15 +77,17 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
             )
         },
         contentKey = { it }
-    ) {
+    ) { destination ->
         val nestedNavState = navState.copy(
             backStack = navState.backStack.drop(lastContentIndex + 1)
         )
 
-        getContentScreen(it).Content(nestedNavState)
+        getContentScreen(destination).Content(nestedNavState)
 
         val modalDestinations = navState.backStack
-            .drop(lastContentIndex)
+            .dropWhile { it != destination }
+            .drop(1)
+            .takeWhile { it is Destination.Modal }
             .filterIsInstance<Destination.Modal>()
 
         val rememberedModalDestinations =
@@ -97,7 +98,6 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
         itemsToRemove.forEach { itemToRemove ->
             val screen = getModalScreen(itemToRemove)
             key(itemToRemove) {
-
                 screen.Content(
                     targetState = SheetValue.Hidden,
                     nestedNavState = NavState(
@@ -112,12 +112,9 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
             }
         }
 
-        val itemsToAdd = modalDestinations - rememberedModalDestinations.get()
-
-        itemsToAdd.forEach { itemToAdd ->
+        modalDestinations.forEach { itemToAdd ->
             val screen = getModalScreen(itemToAdd)
             key(itemToAdd) {
-
                 screen.Content(
                     targetState = SheetValue.Expanded,
                     nestedNavState = NavState(
