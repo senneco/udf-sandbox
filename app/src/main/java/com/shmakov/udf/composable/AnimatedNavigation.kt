@@ -7,11 +7,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import com.shmakov.udf.UdfApp.Companion.appState
 import com.shmakov.udf.composable.screen.*
 import com.shmakov.udf.navigation.*
+import timber.log.Timber
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-@OptIn(ExperimentalAnimationApi::class, ExperimentalMaterial3Api::class)
+private var lastadded: Destination? = null
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnimatedNavigation(navState: NavState, into: Destination) {
     val rootDestination = navState.backStack.firstOrNull() ?: return
@@ -93,37 +98,38 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
         val rememberedModalDestinations =
             remember { AtomicReference(emptyList<Destination.Modal>()) }
 
-        val itemsToRemove = rememberedModalDestinations.get() - modalDestinations
+        // TODO: some times doesn't shows up bottom sheet after close it and try then open again
+        val itemsToRemove = rememberedModalDestinations.get() - modalDestinations.toSet()
 
-        itemsToRemove.forEach { itemToRemove ->
-            val screen = getModalScreen(itemToRemove)
-            key(itemToRemove) {
+        // need some diff util, because on back navigation, we show `hide` animation below visible elements
+        (itemsToRemove + modalDestinations).forEach { item ->
+            key(item) {
+                val screen = getModalScreen(item)
+
                 screen.Content(
-                    targetState = SheetValue.Hidden,
-                    nestedNavState = NavState(
-                        emptyList(), NavActionType.Pop
-                    ),
-                    onHide = {
-                        rememberedModalDestinations.getAndUpdate { items ->
-                            items - itemToRemove
-                        }
+                    targetState = if (item in modalDestinations) {
+                        SheetValue.Expanded
+                    } else {
+                        SheetValue.Hidden
                     },
-                )
-            }
-        }
-
-        modalDestinations.forEach { itemToAdd ->
-            val screen = getModalScreen(itemToAdd)
-            key(itemToAdd) {
-                screen.Content(
-                    targetState = SheetValue.Expanded,
                     nestedNavState = NavState(
                         emptyList(), NavActionType.Push
                     ),
                     onHide = {
                         rememberedModalDestinations.getAndUpdate { items ->
-                            items - itemToAdd
+                            items - item
                         }
+
+                        appState = appState.copy(
+                            navState = appState.navState
+                                .copy(
+                                    backStack = appState.navState
+                                        .backStack
+                                        .filter {
+                                            it != item
+                                        },
+                                ),
+                        )
                     },
                 )
             }
@@ -156,38 +162,34 @@ private fun getModalScreen(destination: Destination): ModalScreen {
     return result!!
 }
 
-@OptIn(ExperimentalAnimationApi::class)
-private val AnimatedContentScope<*>.appPushEnterTransition: EnterTransition
+private val AnimatedContentTransitionScope<*>.appPushEnterTransition: EnterTransition
     get() {
         return slideIntoContainer(
-            AnimatedContentScope.SlideDirection.Left,
+            AnimatedContentTransitionScope.SlideDirection.Left,
             animationSpec = tween()
         )
     }
 
-@OptIn(ExperimentalAnimationApi::class)
-private val AnimatedContentScope<*>.appPushExitTransition: ExitTransition
+private val AnimatedContentTransitionScope<*>.appPushExitTransition: ExitTransition
     get() {
         return slideOutOfContainer(
-            AnimatedContentScope.SlideDirection.Left,
+            AnimatedContentTransitionScope.SlideDirection.Left,
             animationSpec = tween()
         )
     }
 
-@OptIn(ExperimentalAnimationApi::class)
-private val AnimatedContentScope<*>.appPopEnterTransition: EnterTransition
+private val AnimatedContentTransitionScope<*>.appPopEnterTransition: EnterTransition
     get() {
         return slideIntoContainer(
-            AnimatedContentScope.SlideDirection.Right,
+            AnimatedContentTransitionScope.SlideDirection.Right,
             animationSpec = tween()
         )
     }
 
-@OptIn(ExperimentalAnimationApi::class)
-private val AnimatedContentScope<*>.appPopExitTransition: ExitTransition
+private val AnimatedContentTransitionScope<*>.appPopExitTransition: ExitTransition
     get() {
         return slideOutOfContainer(
-            AnimatedContentScope.SlideDirection.Right,
+            AnimatedContentTransitionScope.SlideDirection.Right,
             animationSpec = tween()
         )
     }
