@@ -43,20 +43,20 @@ class AccountScreen(
             sheetState = state,
             sheetContent = {
                 Text(
-                    text = "Account #${destination.id}",
+                    text = "Account #${destination.accountId}",
                     modifier = Modifier.padding(16.dp),
                 )
 
-                if (destination.id < 9) {
+                if (destination.accountId < 9) {
                     Button(onClick = {
                         appState = appState.copy(
                             navState = appState.navState.copy(
-                                backStack = appState.navState.backStack + Account(destination.id + 1),
+                                backStack = appState.navState.backStack + Account(accountId = destination.accountId + 1),
                                 lastNavActionType = NavActionType.Push,
                             )
                         )
                     }) {
-                        Text(text = "Go to Account #${destination.id + 1}")
+                        Text(text = "Go to Account #${destination.accountId + 1}")
                     }
                 }
 
@@ -64,7 +64,7 @@ class AccountScreen(
                     appState = appState.copy(
                         navState = appState.navState.copy(
                             backStack = appState.navState.backStack + AccountDetails(
-                                destination.id
+                                accountId = destination.accountId
                             ),
                             lastNavActionType = NavActionType.Push,
                         )

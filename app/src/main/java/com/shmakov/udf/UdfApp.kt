@@ -25,7 +25,7 @@ class UdfApp : Application() {
         var appState by mutableStateOf(
             AppState(
                 navState = NavState(
-                    listOf(Home, Accounts, Account(1)),
+                    listOf(Home, Accounts, Account(accountId = 1)),
                     lastNavActionType = NavActionType.Replace,
                 ),
                 showInPlace = false,

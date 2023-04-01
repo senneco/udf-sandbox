@@ -1,10 +1,10 @@
 package com.shmakov.udf.navigation
 
-private var nextId = 0
+private var nextId = 0L
 
-open class Destination {
+sealed class Destination {
 
-    private val id = nextId++
+    open val destinationId = nextId++
 
     open class Content : Destination()
 
@@ -17,14 +17,26 @@ object Home : Destination.Content()
 
 object Accounts : Destination.Content()
 
-data class Account(val id: Int) : Destination.Modal()
+data class Account(
+    override val destinationId: Long = nextId++,
+    val accountId: Int
+) : Destination.Modal()
 
-data class AccountDetails(val id: Int) : Destination.Content()
+data class AccountDetails(
+    override val destinationId: Long = nextId++,
+    val accountId: Int,
+) : Destination.Content()
 
 object Transactions : Destination.Content()
 
-data class Transaction(val id: Int) : Destination.Content()
+data class Transaction(
+    override val destinationId: Long = nextId++,
+    val transactionId: Int,
+) : Destination.Content()
 
 object Cards : Destination.Content()
 
-data class Card(val id: Int) : Destination.Content()
+data class Card(
+    override val destinationId: Long = nextId++,
+    val cardId: Int,
+) : Destination.Content()

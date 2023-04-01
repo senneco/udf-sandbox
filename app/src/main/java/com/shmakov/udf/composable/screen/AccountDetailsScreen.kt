@@ -11,7 +11,7 @@ class AccountDetailsScreen(
     @Composable
     override fun Content(nestedNavState: NavState) {
         AccountDetailsScreenContent(
-            id = destination.id,
+            id = destination.accountId,
         )
     }
 }

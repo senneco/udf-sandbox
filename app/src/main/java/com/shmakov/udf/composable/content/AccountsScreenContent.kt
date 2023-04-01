@@ -34,7 +34,7 @@ fun AccountsScreenContent() {
 private fun navigateTo(id: Int) {
     appState = appState.copy(
         navState = appState.navState.copy(
-            backStack = appState.navState.backStack + Account(id),
+            backStack = appState.navState.backStack + Account(accountId = id),
             lastNavActionType = NavActionType.Push,
         )
     )
