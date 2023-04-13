@@ -33,7 +33,7 @@ class AccountScreen(
         )
         val scope = rememberCoroutineScope()
 
-        if (shown.get() && !state.isVisible) {
+        if (targetState == SheetValue.Hidden && shown.get() && !state.isVisible) {
             onHide()
 
             return
