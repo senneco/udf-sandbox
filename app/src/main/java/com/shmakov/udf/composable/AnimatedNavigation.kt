@@ -10,8 +10,6 @@ import androidx.compose.ui.Modifier
 import com.shmakov.udf.UdfApp.Companion.appState
 import com.shmakov.udf.composable.screen.*
 import com.shmakov.udf.navigation.*
-import timber.log.Timber
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 private var lastadded: Destination? = null
@@ -98,11 +96,31 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
         val rememberedModalDestinations =
             remember { AtomicReference(emptyList<Destination.Modal>()) }
 
-        // TODO: some times doesn't shows up bottom sheet after close it and try then open again
-        val itemsToRemove = rememberedModalDestinations.get() - modalDestinations.toSet()
+        val lastModalDestinations = rememberedModalDestinations.get()
 
-        // need some diff util, because on back navigation, we show `hide` animation below visible elements
-        (itemsToRemove + modalDestinations).forEach { item ->
+        val allDestinations = mutableListOf<Destination.Modal>()
+
+        var lastIndex = 0
+
+        var lastNewIndex = modalDestinations.size
+
+        modalDestinations.forEachIndexed { index, modalDestination ->
+            val indexInLast = lastModalDestinations.indexOf(modalDestination)
+
+            if (indexInLast != -1) {
+                // remove items between two founded items
+                val sublist = lastModalDestinations.subList(lastIndex, indexInLast)
+                allDestinations += sublist + modalDestination
+                lastIndex = indexInLast + 1
+            } else {
+                lastNewIndex = index
+                return@forEachIndexed
+            }
+        }
+
+        allDestinations += lastModalDestinations.drop(lastIndex) + modalDestinations.drop(lastNewIndex)
+
+        allDestinations.forEach { item ->
             key(item) {
                 val screen = getModalScreen(item)
 
