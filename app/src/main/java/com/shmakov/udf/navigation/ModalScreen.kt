@@ -1,13 +1,13 @@
 package com.shmakov.udf.navigation
 
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.SheetValue
 import androidx.compose.runtime.Composable
 
 abstract class ModalScreen(
     open val destination: Destination,
 ) {
 
+    // TODO: can we show child right in this modal screen?
+    // TODO: should children always be shown in AppRoot, or in something else??
     @Composable
     open fun whereToShowChild(
         whereShowCurrentDestination: Destination,
@@ -16,11 +16,16 @@ abstract class ModalScreen(
         return AppRoot
     }
 
-    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     abstract fun Content(
+        // TODO: is nestedNavState really required here?
         nestedNavState: NavState,
-        targetState: SheetValue,
+        targetState: ModalScreenState,
         onHide: () -> Unit,
     )
+}
+
+enum class ModalScreenState {
+    Hidden,
+    Shown,
 }

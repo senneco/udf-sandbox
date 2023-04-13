@@ -126,9 +126,9 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
 
                 screen.Content(
                     targetState = if (item in modalDestinations) {
-                        SheetValue.Expanded
+                        ModalScreenState.Shown
                     } else {
-                        SheetValue.Hidden
+                        ModalScreenState.Hidden
                     },
                     nestedNavState = NavState(
                         emptyList(), NavActionType.Push
@@ -157,6 +157,7 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
     }
 }
 
+// TODO: create separated solution
 private fun getContentScreen(destination: Destination): Screen {
     val result = when (destination) {
         is Home -> HomeScreen(destination)
@@ -170,9 +171,10 @@ private fun getContentScreen(destination: Destination): Screen {
     return result!!
 }
 
+// TODO: create separated solution
 private fun getModalScreen(destination: Destination): ModalScreen {
     val result = when (destination) {
-        is Account -> AccountScreen(destination)
+        is Account -> AccountBottomSheet(destination)
         else -> null
     }
 
