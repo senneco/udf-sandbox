@@ -17,6 +17,7 @@ class AccountScreen(
     override val destination: Account
 ) : ModalScreen(destination) {
 
+    // TODO: extract reusable code
     @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
     @Composable
     override fun Content(

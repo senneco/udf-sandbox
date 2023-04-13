@@ -108,9 +108,8 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
             val indexInLast = lastModalDestinations.indexOf(modalDestination)
 
             if (indexInLast != -1) {
-                // remove items between two founded items
-                val sublist = lastModalDestinations.subList(lastIndex, indexInLast)
-                allDestinations += sublist + modalDestination
+                allDestinations += lastModalDestinations.subList(lastIndex, indexInLast)
+                allDestinations += modalDestination
                 lastIndex = indexInLast + 1
             } else {
                 lastNewIndex = index
@@ -118,7 +117,8 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
             }
         }
 
-        allDestinations += lastModalDestinations.drop(lastIndex) + modalDestinations.drop(lastNewIndex)
+        allDestinations += lastModalDestinations.drop(lastIndex)
+        allDestinations += modalDestinations.drop(lastNewIndex)
 
         allDestinations.forEach { item ->
             key(item) {
@@ -153,7 +153,6 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
             }
         }
 
-        // TODO: remove redundant items
         rememberedModalDestinations.set(modalDestinations)
     }
 }

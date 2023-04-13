@@ -4,6 +4,7 @@ private var nextId = 0L
 
 sealed class Destination {
 
+    // TODO: need to optimize this, becuase it isn't clear - when to override or not this this field
     open val destinationId = nextId++
 
     open class Content : Destination()
