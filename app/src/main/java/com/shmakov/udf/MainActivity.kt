@@ -10,7 +10,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.shmakov.udf.UdfApp.Companion.appState
-import com.shmakov.udf.composable.AnimatedNavigation
+import com.shmakov.udf.composable.common.AnimatedNavigation
 import com.shmakov.udf.navigation.NavActionType
 import com.shmakov.udf.navigation.AppRoot
 import com.shmakov.udf.ui.theme.UDFTheme

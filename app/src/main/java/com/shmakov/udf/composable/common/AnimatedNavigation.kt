@@ -1,20 +1,41 @@
-package com.shmakov.udf.composable
+package com.shmakov.udf.composable.common
 
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import com.shmakov.udf.UdfApp.Companion.appState
-import com.shmakov.udf.composable.screen.*
-import com.shmakov.udf.navigation.*
+import com.shmakov.udf.composable.screen.AccountBottomSheet
+import com.shmakov.udf.composable.screen.AccountDetailsScreen
+import com.shmakov.udf.composable.screen.AccountsScreen
+import com.shmakov.udf.composable.screen.CardsScreen
+import com.shmakov.udf.composable.screen.HomeScreen
+import com.shmakov.udf.composable.screen.TransactionsScreen
+import com.shmakov.udf.navigation.Account
+import com.shmakov.udf.navigation.AccountDetails
+import com.shmakov.udf.navigation.Accounts
+import com.shmakov.udf.navigation.Cards
+import com.shmakov.udf.navigation.Destination
+import com.shmakov.udf.navigation.Home
+import com.shmakov.udf.navigation.ModalScreen
+import com.shmakov.udf.navigation.ModalScreenState
+import com.shmakov.udf.navigation.NavActionType
+import com.shmakov.udf.navigation.NavState
+import com.shmakov.udf.navigation.Screen
+import com.shmakov.udf.navigation.Transactions
 import java.util.concurrent.atomic.AtomicReference
 
-private var lastadded: Destination? = null
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnimatedNavigation(navState: NavState, into: Destination) {
     val rootDestination = navState.backStack.firstOrNull() ?: return
@@ -124,7 +145,7 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
             key(item) {
                 val screen = getModalScreen(item)
 
-                screen.Content(
+                screen.ModalContent(
                     targetState = if (item in modalDestinations) {
                         ModalScreenState.Shown
                     } else {

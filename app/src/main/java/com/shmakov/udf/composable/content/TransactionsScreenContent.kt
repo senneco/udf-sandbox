@@ -10,8 +10,6 @@ import timber.log.Timber
 
 @Composable
 fun TransactionsScreenContent() {
-    Timber.i("***-*** draw Transactions Screen")
-
     Text(
         text = "Transactions Screen",
         modifier = Modifier

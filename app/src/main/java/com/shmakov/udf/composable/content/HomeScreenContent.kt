@@ -6,14 +6,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import com.shmakov.udf.UdfApp.Companion.appState
-import com.shmakov.udf.composable.AnimatedNavigation
+import com.shmakov.udf.composable.common.AnimatedNavigation
 import com.shmakov.udf.navigation.*
 
 @Composable

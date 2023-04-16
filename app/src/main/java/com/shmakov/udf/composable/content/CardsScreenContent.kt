@@ -10,8 +10,6 @@ import timber.log.Timber
 
 @Composable
 fun CardsScreenContent() {
-    Timber.i("***-*** draw Cards Screen")
-
     Text(
         text = "Cards Screen", modifier = Modifier
             .fillMaxSize()
