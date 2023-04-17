@@ -98,13 +98,14 @@ fun BottomSheetLayout(
 private fun Scrim(
     color: Color,
     onDismissRequest: () -> Unit,
-    visible: Boolean
+    visible: Boolean,
 ) {
     if (color.isSpecified) {
         val alpha by animateFloatAsState(
             targetValue = if (visible) 1f else 0f,
             animationSpec = TweenSpec()
         )
+
         val dismissSheet = if (visible) {
             Modifier
                 .pointerInput(onDismissRequest) {
@@ -116,6 +117,7 @@ private fun Scrim(
         } else {
             Modifier
         }
+
         Canvas(
             Modifier
                 .fillMaxSize()

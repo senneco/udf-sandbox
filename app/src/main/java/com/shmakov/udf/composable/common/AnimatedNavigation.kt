@@ -151,9 +151,6 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
                     } else {
                         ModalScreenState.Hidden
                     },
-                    nestedNavState = NavState(
-                        emptyList(), NavActionType.Push
-                    ),
                     onHide = {
                         rememberedModalDestinations.getAndUpdate { items ->
                             items - item
