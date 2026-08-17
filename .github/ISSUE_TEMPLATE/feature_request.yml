@@ -1,0 +1,34 @@
+name: Feature or experiment
+description: Propose a UDF, navigation, state, or UI experiment
+title: "[Idea]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or question
+      description: What should this experiment help us learn or solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Describe the state, events, effects, navigation, and UI involved.
+    validations:
+      required: true
+
+  - type: textarea
+    id: success
+    attributes:
+      label: Success criteria
+      description: What observable behavior or test would demonstrate success?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and trade-offs
