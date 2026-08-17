@@ -1,18 +1,25 @@
-## Why
+## Зачем
 
-<!-- What problem or experiment does this change address? -->
+<!-- Какую проблему или гипотезу проверяет изменение? -->
 
-## What changed
+Closes #<!-- номер issue -->
 
-<!-- Describe state, event, effect, navigation, and UI changes where relevant. -->
+## Что изменилось
 
-## Verification
+<!-- Опишите изменения state, actions, effects, navigation и UI. -->
+
+## Проверка
 
 - [ ] `./gradlew testDebugUnitTest lintDebug assembleDebug`
-- [ ] I added or updated tests for behavior changes
-- [ ] I checked state restoration and navigation/back behavior
-- [ ] I attached screenshots or a short recording for UI changes
+- [ ] Я добавил или обновил тесты для изменённого поведения либо отметил N/A
+- [ ] Я проверил state restoration и navigation/Back behavior либо отметил N/A
+- [ ] Я приложил screenshots или короткую запись для UI-изменений либо отметил N/A
+- [ ] Я сохранил или осознанно обновил инварианты из `docs/PROJECT_CONTEXT.md` либо отметил N/A
 
-## Notes
+## Пример state и projection
 
-<!-- Follow-ups, trade-offs, or known limitations. -->
+<!-- Для navigation-изменений покажите action, state до/после и compact/expanded projection. -->
+
+## Примечания
+
+<!-- Оставшиеся trade-offs, follow-up issues или известные ограничения. -->

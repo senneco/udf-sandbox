@@ -1,34 +1,77 @@
-name: Feature or experiment
-description: Propose a UDF, navigation, state, or UI experiment
-title: "[Idea]: "
+name: Фича или эксперимент
+description: Предложить эксперимент с UDF, navigation state, projection или Compose UI
+title: "[Идея]: "
 labels:
   - enhancement
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Сохраняйте эксперимент сфокусированным. Укажите зависимость в roadmap, опишите проверяемый state transition или projection и сформулируйте наблюдаемый результат.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Контекст
+      description: Что должен знать Android-разработчик без контекста проекта, чтобы оценить предложение?
+    validations:
+      required: true
+
   - type: textarea
     id: problem
     attributes:
-      label: Problem or question
-      description: What should this experiment help us learn or solve?
+      label: Проблема или вопрос
+      description: Что этот эксперимент должен помочь понять или исправить?
     validations:
       required: true
 
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed approach
-      description: Describe the state, events, effects, navigation, and UI involved.
+      label: Предлагаемый подход
+      description: Опишите затронутые state, actions, effects, navigation и UI.
     validations:
       required: true
 
   - type: textarea
+    id: state_example
+    attributes:
+      label: Пример state или projection
+      description: Покажите action, state до и после, а также compact/expanded projection, если это применимо.
+      placeholder: |
+        Action: Back
+        До: Home -> Accounts -> Account(42)
+        После: Home -> Accounts
+        Single-pane UI: Accounts
+        Multi-pane UI: Home с Accounts в дочернем слоте
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Затронутые инварианты
+      description: Какие правила из docs/PROJECT_CONTEXT.md должны остаться истинными?
+
+  - type: textarea
     id: success
     attributes:
-      label: Success criteria
-      description: What observable behavior or test would demonstrate success?
+      label: Критерии успеха
+      description: Какое наблюдаемое поведение или тест докажет успех?
     validations:
       required: true
 
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives and trade-offs
+      label: Альтернативы и trade-offs
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Вне scope
+      description: Какая связанная работа намеренно исключена из этой issue?
+
+  - type: input
+    id: dependencies
+    attributes:
+      label: Зависимости
+      description: Укажите blocking или prerequisite issues либо напишите "Нет".
