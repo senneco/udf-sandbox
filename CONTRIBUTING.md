@@ -1,12 +1,23 @@
-# Contributing
+# Участие в разработке
 
-This repository is a small Android sandbox for exploring unidirectional data flow (UDF), navigation, and Compose UI behavior. Keep changes focused and explain what the experiment is intended to demonstrate.
+`udf-sandbox` — сфокусированный Android-эксперимент о навигации как состоянии приложения. Перед предложением архитектурных изменений прочитайте [README.md](README.md) и [контекст проекта](docs/PROJECT_CONTEXT.md).
 
-## Local setup
+## Выбор задачи
 
-Install Android Studio with the Android SDK, JDK 17, and an Android emulator or device. The project pins its Gradle version through the wrapper and its Java major version in `.java-version`.
+GitHub Issues — единственный источник истины для запланированной работы и её статуса:
 
-On macOS with the Homebrew `openjdk@17` formula:
+1. Начните с [roadmap возрождения Navigation as State](https://github.com/senneco/udf-sandbox/issues/7).
+2. Выберите одну issue с явными acceptance criteria и зависимостями.
+3. Не выходите за scope выбранной issue в pull request.
+4. Если реализация меняет архитектурное решение или инвариант, обновите `docs/PROJECT_CONTEXT.md` в том же pull request.
+
+Не копируйте issue checklists в документацию репозитория. Ссылайтесь на issue, чтобы статус задачи оставался актуальным в одном месте.
+
+## Локальная настройка
+
+Установите Android Studio, нужный Android SDK, эмулятор или устройство и JDK 17. Версия Gradle закреплена wrapper-файлами, а major-версия Java — в `.java-version`.
+
+На macOS с Homebrew `openjdk@17`:
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
@@ -14,13 +25,23 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-Use a feature branch and open a pull request. Prefer small commits and include tests for changed behavior. UI changes should include a screenshot or short recording.
+## Подход к разработке
 
-## Pull request checklist
+- Перед большим rewrite предпочитайте небольшой behavior-preserving extraction.
+- По возможности оставляйте navigation models, reducers и projection logic чистым Kotlin-кодом.
+- Отделяйте route state от анимации и другого временного presentation state.
+- Добавляйте сфокусированные тесты для изменений push, pop, replace, dismiss, restoration и adaptive projection.
+- Не смешивайте обновление зависимостей или форматирование всего репозитория с изменением поведения.
+- Не включайте credentials, signing material, `local.properties`, персональные данные и generated build output.
 
-Before opening a pull request:
+## Checklist pull request
 
-1. Run `./gradlew testDebugUnitTest lintDebug assembleDebug`.
-2. Check navigation and Android back behavior.
-3. Check state restoration after activity or process recreation where relevant.
-4. Remove secrets and personal data from logs, screenshots, fixtures, and commits.
+Перед открытием pull request:
+
+1. Укажите GitHub issue и объясните, какие acceptance criteria выполнены.
+2. Выполните `./gradlew testDebugUnitTest lintDebug assembleDebug` на JDK 17.
+3. Добавьте или обновите тесты для каждого изменённого state transition или projection rule.
+4. Проверьте Android Back, быстрые повторные события и устаревшие animation callbacks, если это относится к изменению.
+5. Проверьте Activity recreation и process restoration, если это относится к изменению.
+6. Приложите скриншот или короткую запись для видимых UI-изменений и укажите конфигурацию окна.
+7. Явно опишите оставшиеся trade-offs и follow-up work вместо скрытого расширения scope.

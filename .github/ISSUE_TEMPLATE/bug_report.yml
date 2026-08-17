@@ -1,56 +1,97 @@
-name: Bug report
-description: Report reproducible incorrect behavior or a crash
-title: "[Bug]: "
+name: Сообщение о баге
+description: Сообщить о воспроизводимом неверном поведении или crash
+title: "[Баг]: "
 labels:
   - bug
 body:
   - type: markdown
     attributes:
-      value: Thanks for helping improve udf-sandbox. Please remove sensitive data from logs and screenshots.
+      value: Перед публикацией удалите tokens, персональные данные и другие секреты из logs и screenshots.
 
   - type: textarea
     id: summary
     attributes:
-      label: Summary
-      description: What went wrong?
+      label: Краткое описание
+      description: Что работает неправильно?
     validations:
       required: true
 
   - type: textarea
     id: steps
     attributes:
-      label: Steps to reproduce
+      label: Шаги воспроизведения
       placeholder: |
-        1. Open ...
-        2. Tap ...
-        3. Observe ...
+        1. Открыть ...
+        2. Нажать ...
+        3. Наблюдать ...
     validations:
       required: true
 
   - type: textarea
+    id: nav_state
+    attributes:
+      label: Navigation state до и после
+      description: Если баг связан с навигацией, укажите логический stack и action.
+      placeholder: |
+        Action: swipe-to-dismiss Account(42)
+        До: Home -> Accounts -> Account(42)
+        Ожидалось после: Home -> Accounts
+        Фактически после: Home -> Accounts -> Account(42)
+
+  - type: textarea
     id: expected
     attributes:
-      label: Expected behavior
+      label: Ожидаемое поведение
     validations:
       required: true
 
   - type: textarea
     id: actual
     attributes:
-      label: Actual behavior
+      label: Фактическое поведение
     validations:
       required: true
 
   - type: input
     id: environment
     attributes:
-      label: Device and Android version
+      label: Устройство и версия Android
       placeholder: Pixel 7 Pro emulator, Android 14 / API 34
     validations:
       required: true
 
+  - type: dropdown
+    id: layout
+    attributes:
+      label: Конфигурация окна
+      options:
+        - Single-pane
+        - Multi-pane
+        - Обе
+        - Не применимо
+    validations:
+      required: true
+
+  - type: dropdown
+    id: orientation
+    attributes:
+      label: Ориентация
+      options:
+        - Portrait
+        - Landscape
+        - Обе
+        - Не применимо
+    validations:
+      required: true
+
+  - type: textarea
+    id: lifecycle
+    attributes:
+      label: Lifecycle и способ ввода
+      description: Укажите rotation, Activity recreation, process recreation, Android Back, swipe, scrim tap или быстрые повторные события, если это важно.
+
   - type: textarea
     id: evidence
     attributes:
-      label: Logs, screenshots, or recording
-      description: Drag files here. Remove tokens, personal data, and other secrets first.
+      label: Logs, screenshots или запись
+      description: Перетащите файлы сюда. Сначала удалите tokens, персональные данные и другие секреты.
