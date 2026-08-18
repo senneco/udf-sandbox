@@ -8,15 +8,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import com.shmakov.udf.UdfApp.Companion.appState
+import com.shmakov.udf.UdfApp
 import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.BackStackEntry
-import com.shmakov.udf.navigation.NavActionType
-import com.shmakov.udf.navigation.NavState
-import com.shmakov.udf.navigation.requireValid
+import com.shmakov.udf.navigation.NavAction
 
 @Composable
-fun AccountsScreenContent() {
+fun AccountsScreenContent(currentEntry: BackStackEntry) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -27,18 +25,18 @@ fun AccountsScreenContent() {
         )
 
         for (i in 1..10) {
-            Button(onClick = { navigateTo(i) }) {
+            Button(onClick = { navigateTo(currentEntry, i) }) {
                 Text(text = "Go to Account $i")
             }
         }
     }
 }
 
-private fun navigateTo(id: Int) {
-    appState = appState.copy(
-        navState = NavState.fromEntries(
-            appState.navState.entries + BackStackEntry.create(Account(accountId = id)),
-        ).requireValid(),
-        lastNavActionType = NavActionType.Push,
+private fun navigateTo(currentEntry: BackStackEntry, id: Int) {
+    UdfApp.dispatchNavigation(
+        NavAction.push(
+            expectedTopId = currentEntry.id,
+            route = Account(accountId = id),
+        ),
     )
 }

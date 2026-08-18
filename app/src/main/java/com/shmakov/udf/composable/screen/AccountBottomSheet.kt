@@ -16,6 +16,7 @@ class AccountBottomSheet(
         val route = entry.route as Account
 
         AccountBottomSheetContent(
+            currentEntry = entry,
             accountId = route.accountId,
         )
     }

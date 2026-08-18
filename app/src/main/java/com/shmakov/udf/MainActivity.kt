@@ -11,9 +11,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.shmakov.udf.UdfApp.Companion.appState
 import com.shmakov.udf.composable.common.AnimatedNavigation
-import com.shmakov.udf.navigation.NavActionType
-import com.shmakov.udf.navigation.NavState
-import com.shmakov.udf.navigation.requireValid
+import com.shmakov.udf.navigation.NavAction
+import com.shmakov.udf.navigation.NavTransitionIntent
 import com.shmakov.udf.ui.theme.UDFTheme
 
 class MainActivity : ComponentActivity() {
@@ -22,19 +21,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
+            val currentAppState = appState
+            val currentNavTransition = UdfApp.navTransition
 
-            BackHandler(enabled = appState.navState.entries.size > 1) {
-                val currentState = appState
-                val currentEntries = currentState.navState.entries
-
-                if (currentEntries.size > 1) {
-                    appState = currentState.copy(
-                        navState = NavState.fromEntries(
-                            currentEntries.dropLast(1),
-                        ).requireValid(),
-                        lastNavActionType = NavActionType.Pop,
-                    )
-                }
+            BackHandler(enabled = currentAppState.navState.entries.size > 1) {
+                UdfApp.dispatchNavigation(NavAction.Pop)
             }
 
 
@@ -44,17 +35,23 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppContent(appState)
+                    AppContent(
+                        appState = currentAppState,
+                        navTransition = currentNavTransition,
+                    )
                 }
             }
         }
     }
 
     @Composable
-    private fun AppContent(appState: AppState) {
+    private fun AppContent(
+        appState: AppState,
+        navTransition: NavTransitionIntent?,
+    ) {
         AnimatedNavigation(
             navState = appState.navState,
-            lastNavActionType = appState.lastNavActionType,
+            navTransition = navTransition,
         )
     }
 }

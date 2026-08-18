@@ -10,24 +10,21 @@ import com.shmakov.udf.UdfApp
 import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.AccountDetails
 import com.shmakov.udf.navigation.BackStackEntry
-import com.shmakov.udf.navigation.NavActionType
-import com.shmakov.udf.navigation.NavState
-import com.shmakov.udf.navigation.requireValid
+import com.shmakov.udf.navigation.NavAction
 
 @Composable
 fun ColumnScope.AccountBottomSheetContent(
+    currentEntry: BackStackEntry,
     accountId: Int,
 ) {
     if (accountId < 9) {
         Button(
             onClick = {
-                UdfApp.appState = UdfApp.appState.copy(
-                    navState = NavState.fromEntries(
-                        UdfApp.appState.navState.entries + BackStackEntry.create(
-                            Account(accountId = accountId + 1),
-                        ),
-                    ).requireValid(),
-                    lastNavActionType = NavActionType.Push,
+                UdfApp.dispatchNavigation(
+                    NavAction.push(
+                        expectedTopId = currentEntry.id,
+                        route = Account(accountId = accountId + 1),
+                    ),
                 )
             },
         ) {
@@ -37,15 +34,11 @@ fun ColumnScope.AccountBottomSheetContent(
 
     Button(
         onClick = {
-            UdfApp.appState = UdfApp.appState.copy(
-                navState = NavState.fromEntries(
-                    UdfApp.appState.navState.entries + BackStackEntry.create(
-                        AccountDetails(
-                            accountId = accountId,
-                        ),
-                    ),
-                ).requireValid(),
-                lastNavActionType = NavActionType.Push,
+            UdfApp.dispatchNavigation(
+                NavAction.push(
+                    expectedTopId = currentEntry.id,
+                    route = AccountDetails(accountId = accountId),
+                ),
             )
         },
         modifier = Modifier
