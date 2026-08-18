@@ -11,12 +11,14 @@ abstract class BottomSheet(
     @Composable
     override fun ModalContent(
         targetState: ModalScreenState,
-        onHide: () -> Unit,
+        onDismissRequest: () -> Unit,
+        onExitFinished: () -> Unit,
         onNavigationAction: (NavAction) -> Unit,
     ) {
         BottomSheetLayout(
             targetState = targetState,
-            onHide = onHide,
+            onDismissRequest = onDismissRequest,
+            onExitFinished = onExitFinished,
         ) {
             Content(onNavigationAction = onNavigationAction)
         }

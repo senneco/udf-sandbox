@@ -9,7 +9,8 @@ abstract class ModalScreen(
     @Composable
     abstract fun ModalContent(
         targetState: ModalScreenState,
-        onHide: () -> Unit,
+        onDismissRequest: () -> Unit,
+        onExitFinished: () -> Unit,
         onNavigationAction: (NavAction) -> Unit,
     )
 }

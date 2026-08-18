@@ -1,5 +1,7 @@
 package com.shmakov.udf.composable.common
 
+import com.shmakov.udf.ModalExitToken
+import com.shmakov.udf.PresentedModalLayer
 import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.AccountDetails
 import com.shmakov.udf.navigation.Accounts
@@ -10,6 +12,8 @@ import com.shmakov.udf.navigation.ContentPlacementDecision
 import com.shmakov.udf.navigation.ContentRoute
 import com.shmakov.udf.navigation.EntryId
 import com.shmakov.udf.navigation.Home
+import com.shmakov.udf.navigation.ModalLayer
+import com.shmakov.udf.navigation.ModalScreen
 import com.shmakov.udf.navigation.NavProjectionResult
 import com.shmakov.udf.navigation.NavProjector
 import com.shmakov.udf.navigation.NavState
@@ -165,6 +169,117 @@ class DestinationCatalogContractTest {
         }
     }
 
+    @Test
+    fun `presentation materializer uses current desired screens and prior exiting screens in plan order`() {
+        val a = modalLayer("a", accountId = 1)
+        val b = modalLayer("b", accountId = 2)
+        val c = modalLayer("c", accountId = 3)
+        val d = modalLayer("d", accountId = 4)
+        val previousAScreen = modalScreen(a)
+        val previousBScreen = modalScreen(b)
+        val previousCScreen = modalScreen(c)
+        val currentAScreen = modalScreen(a)
+        val currentCScreen = modalScreen(c)
+        val currentDScreen = modalScreen(d)
+        val aExit = PresentedModalLayer.Exiting(
+            layer = a,
+            token = ModalExitToken(a.entry.id, generation = 1),
+        )
+        val bExit = PresentedModalLayer.Exiting(
+            layer = b,
+            token = ModalExitToken(b.entry.id, generation = 2),
+        )
+        val desiredC = PresentedModalLayer.Desired(c)
+        val desiredD = PresentedModalLayer.Desired(d)
+
+        val result = DestinationTreeBinder.materializePresentedModalLayers(
+            layers = listOf(desiredC, desiredD, aExit, bExit),
+            desiredLayers = listOf(
+                BoundModalLayer(c, currentCScreen),
+                BoundModalLayer(d, currentDScreen),
+                BoundModalLayer(a, currentAScreen),
+            ),
+            acceptedLayers = listOf(
+                BoundPresentedModalLayer(PresentedModalLayer.Desired(a), previousAScreen),
+                BoundPresentedModalLayer(PresentedModalLayer.Desired(b), previousBScreen),
+                BoundPresentedModalLayer(PresentedModalLayer.Desired(c), previousCScreen),
+            ),
+        )
+
+        assertTrue("Expected Success, got $result", result is PresentedModalLayersBindingResult.Success)
+        val layers = (result as PresentedModalLayersBindingResult.Success).layers
+        assertEquals(listOf(desiredC, desiredD, aExit, bExit), layers.map { it.presentation })
+        assertSame(currentCScreen, layers[0].screen)
+        assertSame(currentDScreen, layers[1].screen)
+        assertSame(previousAScreen, layers[2].screen)
+        assertSame(previousBScreen, layers[3].screen)
+    }
+
+    @Test
+    fun `missing current binding for a desired presentation is a typed failure`() {
+        val desired = modalLayer("desired", accountId = 5)
+        val acceptedScreen = modalScreen(desired)
+
+        assertEquals(
+            PresentedModalLayersBindingResult.Failure(
+                DestinationTreeBindingProblem.MissingPresentationBinding(desired.entry),
+            ),
+            DestinationTreeBinder.materializePresentedModalLayers(
+                layers = listOf(PresentedModalLayer.Desired(desired)),
+                desiredLayers = emptyList(),
+                acceptedLayers = listOf(
+                    BoundPresentedModalLayer(
+                        PresentedModalLayer.Desired(desired),
+                        acceptedScreen,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `missing accepted binding for an exiting presentation is a typed failure`() {
+        val exiting = modalLayer("exiting", accountId = 6)
+        val currentScreen = modalScreen(exiting)
+        val presentation = PresentedModalLayer.Exiting(
+            layer = exiting,
+            token = ModalExitToken(exiting.entry.id, generation = 1),
+        )
+
+        assertEquals(
+            PresentedModalLayersBindingResult.Failure(
+                DestinationTreeBindingProblem.MissingPresentationBinding(exiting.entry),
+            ),
+            DestinationTreeBinder.materializePresentedModalLayers(
+                layers = listOf(presentation),
+                desiredLayers = listOf(BoundModalLayer(exiting, currentScreen)),
+                acceptedLayers = emptyList(),
+            ),
+        )
+    }
+
+    @Test
+    fun `materialized presentation result is a defensive runtime unmodifiable copy`() {
+        val desired = modalLayer("desired", accountId = 7)
+        val presentation = PresentedModalLayer.Desired(desired)
+        val sourcePresentations = arrayListOf<PresentedModalLayer>(presentation)
+        val sourceDesired = arrayListOf(BoundModalLayer(desired, modalScreen(desired)))
+
+        val result = DestinationTreeBinder.materializePresentedModalLayers(
+            layers = sourcePresentations,
+            desiredLayers = sourceDesired,
+            acceptedLayers = emptyList(),
+        ) as PresentedModalLayersBindingResult.Success
+        sourcePresentations.clear()
+        sourceDesired.clear()
+
+        assertEquals(listOf(presentation), result.layers.map { it.presentation })
+        assertThrows(UnsupportedOperationException::class.java) {
+            @Suppress("UNCHECKED_CAST")
+            (result.layers as MutableList<BoundPresentedModalLayer>).clear()
+        }
+    }
+
     private fun project(
         navState: NavState,
         policy: NavigationLayoutPolicy,
@@ -181,6 +296,18 @@ class DestinationCatalogContractTest {
 
     private fun entry(id: String, route: Route): BackStackEntry =
         BackStackEntry(EntryId(id), route)
+
+    private fun modalLayer(
+        id: String,
+        accountId: Int,
+        ownerId: String = "owner",
+    ): ModalLayer = ModalLayer(
+        entry = entry(id, Account(accountId)),
+        ownerContentEntryId = EntryId(ownerId),
+    )
+
+    private fun modalScreen(layer: ModalLayer): ModalScreen =
+        (DemoDestinationCatalog.resolve(layer.entry) as DestinationBinding.Modal).screen
 
     private object CustomContent : ContentRoute
 
