@@ -22,10 +22,10 @@ adb -s emulator-5560 shell am instrument -w -r \
 Результат:
 
 ```text
-OK (8 tests)
+OK (10 tests)
 ```
 
-Эти восемь тестов проверяют branch-owned content и modal presentation, batch removal, stale/duplicate/ABA completion, initial и rapid `Shown -> Hidden` lifecycle, разделение dismiss request и completion, а также phase-scoped exactly-once completion.
+Эти десять тестов проверяют branch-owned content и modal presentation, batch removal, stale/duplicate/ABA completion, initial и rapid `Shown -> Hidden` lifecycle, разделение dismiss request и completion, phase-scoped exactly-once completion, exact owner-slot bounds и безопасное освобождение exit при исчезновении nested owner.
 
 ## Maestro smoke flow
 
@@ -41,6 +41,12 @@ OK (8 tests)
 Это smoke evidence реального UI-пути. Generation-token и exactly-once свойства доказываются scoped instrumentation assertions, а не сравнением PNG.
 
 ## Кадры
+
+### Exact owner placement в landscape
+
+[![Bottom sheet ограничен bounds вложенного Accounts owner](owner-placement-landscape.png)](owner-placement-landscape.png)
+
+`owner-placement-landscape.png` снят на финальном APK после отдельной accessibility/bounds-проверки: modal принадлежит nested `Accounts` slot и начинается ниже `Home`, а не получает geometry всей root-ветки. Точный owner offset дополнительно закреплён deterministic Compose assertion.
 
 ### Исходный modal
 

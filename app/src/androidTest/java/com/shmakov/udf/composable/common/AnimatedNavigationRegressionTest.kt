@@ -2,6 +2,7 @@ package com.shmakov.udf.composable.common
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -9,6 +10,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertLeftPositionInRootIsEqualTo
+import androidx.compose.ui.test.assertTopPositionInRootIsEqualTo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -36,6 +39,7 @@ import com.shmakov.udf.navigation.NavigationLayoutPolicy
 import com.shmakov.udf.navigation.NavigationRenderTree
 import com.shmakov.udf.navigation.Route
 import com.shmakov.udf.navigation.Screen
+import com.shmakov.udf.navigation.Transactions
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -369,6 +373,108 @@ class AnimatedNavigationRegressionTest {
         assertEquals(emptyList<NavAction>(), navigationActions)
     }
 
+    @Test
+    fun nestedModalUsesItsExactOwnerSlotBounds() {
+        val home = entry("owner-home", Home)
+        val accounts = entry("owner-accounts", Accounts)
+        val account = entry("owner-account", Account(accountId = 1))
+
+        composeRule.setContent {
+            Box(Modifier.size(OWNER_ROOT_SIZE)) {
+                AnimatedNavigation(
+                    renderTarget = target(
+                        revision = 0,
+                        tree = project(state(home, accounts, account), expandedPane),
+                        transition = null,
+                    ),
+                    onNavigationAction = {},
+                    destinationCatalog = OwnerGeometryDestinationCatalog,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(modalTag(account.id), useUnmergedTree = true)
+            .assertLeftPositionInRootIsEqualTo(OWNER_OFFSET_X)
+            .assertTopPositionInRootIsEqualTo(OWNER_OFFSET_Y)
+    }
+
+    @Test
+    fun disappearingNestedOwnerReleasesItsExactExitWithoutDurableAction() {
+        composeRule.mainClock.autoAdvance = false
+        val home = entry("dispose-home", Home)
+        val accounts = entry("dispose-accounts", Accounts)
+        val account = entry("dispose-account", Account(accountId = 1))
+        val transactions = entry("dispose-transactions", Transactions)
+        val ownerPolicy = NavigationLayoutPolicy {
+            ContentPlacementDecision.childOf(home.id)
+        }
+        val currentTarget = mutableStateOf(
+            target(
+                revision = 0,
+                tree = project(state(home, accounts, account), ownerPolicy),
+                transition = null,
+            ),
+        )
+        val navigationActions = mutableListOf<NavAction>()
+
+        composeRule.setContent {
+            AnimatedNavigation(
+                renderTarget = currentTarget.value,
+                onNavigationAction = navigationActions::add,
+                destinationCatalog = TaggedDestinationCatalog,
+            )
+        }
+        composeRule.waitForIdle()
+        assertModalCount(account.id, 1)
+
+        composeRule.runOnIdle {
+            currentTarget.value = target(
+                revision = 1,
+                tree = project(
+                    state(home, accounts, account, transactions),
+                    ownerPolicy,
+                ),
+                transition = NavTransitionIntent.BranchReplaced(
+                    sourceEntryId = home.id,
+                    removedEntryIds = listOf(accounts.id, account.id),
+                    addedEntryId = transactions.id,
+                ),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.mainClock.advanceTimeBy(MID_ANIMATION_MILLIS)
+
+        assertModalCount(account.id, 1)
+
+        composeRule.mainClock.advanceTimeBy(AFTER_ANIMATION_MILLIS)
+        composeRule.waitForIdle()
+
+        assertModalCount(account.id, 0)
+        assertEquals(emptyList<NavAction>(), navigationActions)
+
+        composeRule.runOnIdle {
+            currentTarget.value = target(
+                revision = 2,
+                tree = project(state(home, accounts), ownerPolicy),
+                transition = NavTransitionIntent.HistoryReplaced(
+                    previousTopEntryId = transactions.id,
+                    targetTopEntryId = accounts.id,
+                ),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.mainClock.advanceTimeBy(MID_ANIMATION_MILLIS)
+
+        // If owner disposal did not complete the exact exit token, it would resurrect here.
+        assertModalCount(account.id, 0)
+
+        composeRule.mainClock.advanceTimeBy(AFTER_ANIMATION_MILLIS)
+        composeRule.waitForIdle()
+        assertModalCount(account.id, 0)
+        assertEquals(emptyList<NavAction>(), navigationActions)
+    }
+
     private fun assertModalCount(entryId: EntryId, expectedCount: Int) {
         composeRule.onAllNodesWithTag(modalTag(entryId), useUnmergedTree = true)
             .assertCountEquals(expectedCount)
@@ -404,7 +510,6 @@ class AnimatedNavigationRegressionTest {
     private companion object {
         const val MID_ANIMATION_MILLIS = 150L
         const val AFTER_ANIMATION_MILLIS = 1_000L
-
         val singlePane = NavigationLayoutPolicy {
             ContentPlacementDecision.root()
         }
@@ -422,6 +527,10 @@ class AnimatedNavigationRegressionTest {
         fun modalTag(entryId: EntryId): String = "modal:${entryId.value}"
     }
 }
+
+private val OWNER_ROOT_SIZE = 300.dp
+private val OWNER_OFFSET_X = 48.dp
+private val OWNER_OFFSET_Y = 64.dp
 
 private object TaggedDestinationCatalog : DestinationCatalog {
     override fun resolve(entry: BackStackEntry): DestinationBinding = when (entry.route) {
@@ -445,6 +554,42 @@ private class TaggedContentScreen(
                 .testTag("content:${entry.id.value}"),
         ) {
             childContent()
+        }
+    }
+}
+
+private object OwnerGeometryDestinationCatalog : DestinationCatalog {
+    override fun resolve(entry: BackStackEntry): DestinationBinding = when (entry.route) {
+        is ContentRoute -> DestinationBinding.Content(OwnerGeometryContentScreen(entry))
+        is ModalRoute -> DestinationBinding.Modal(TaggedModalScreen(entry))
+        else -> DestinationBinding.Unsupported(entry)
+    }
+}
+
+private class OwnerGeometryContentScreen(
+    override val entry: BackStackEntry,
+) : Screen(entry) {
+    @Composable
+    override fun Content(
+        childContent: @Composable () -> Unit,
+        onNavigationAction: (NavAction) -> Unit,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("content:${entry.id.value}"),
+        ) {
+            if (entry.route is Home) {
+                Box(
+                    Modifier
+                        .offset(OWNER_OFFSET_X, OWNER_OFFSET_Y)
+                        .size(120.dp),
+                ) {
+                    childContent()
+                }
+            } else {
+                childContent()
+            }
         }
     }
 }

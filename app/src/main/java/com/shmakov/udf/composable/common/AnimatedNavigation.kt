@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -135,9 +136,6 @@ private fun RenderNavigationBranch(
     RenderContentSlot(
         branchState = branchState,
         contentSlot = branchState.tree.root,
-        onNavigationAction = onNavigationAction,
-    )
-    RenderModalLayers(
         modalLayers = candidateLayers,
         onNavigationAction = onNavigationAction,
         onExitFinished = presentationHolder::completeExit,
@@ -200,17 +198,29 @@ private class BoundRenderState(
 private fun RenderContentSlot(
     branchState: BoundRenderState,
     contentSlot: BoundContentSlot,
+    modalLayers: List<BoundPresentedModalLayer>,
     onNavigationAction: (NavAction) -> Unit,
+    onExitFinished: (ModalExitToken) -> Unit,
 ) {
     contentSlot.screen.Content(
         childContent = {
             RenderChildContent(
                 branchState = branchState,
                 ownerContentEntryId = contentSlot.slot.entry.id,
+                modalLayers = modalLayers,
                 onNavigationAction = onNavigationAction,
+                onExitFinished = onExitFinished,
             )
         },
         onNavigationAction = onNavigationAction,
+    )
+
+    RenderModalLayers(
+        modalLayers = modalLayers.filter { modalLayer ->
+            modalLayer.presentation.layer.ownerContentEntryId == contentSlot.slot.entry.id
+        },
+        onNavigationAction = onNavigationAction,
+        onExitFinished = onExitFinished,
     )
 }
 
@@ -218,7 +228,9 @@ private fun RenderContentSlot(
 private fun RenderChildContent(
     branchState: BoundRenderState,
     ownerContentEntryId: EntryId,
+    modalLayers: List<BoundPresentedModalLayer>,
     onNavigationAction: (NavAction) -> Unit,
+    onExitFinished: (ModalExitToken) -> Unit,
 ) {
     val transition = androidx.compose.animation.core.updateTransition(
         targetState = branchState,
@@ -237,7 +249,9 @@ private fun RenderChildContent(
             RenderContentSlot(
                 branchState = childBranchState,
                 contentSlot = childSlot,
+                modalLayers = modalLayers,
                 onNavigationAction = onNavigationAction,
+                onExitFinished = onExitFinished,
             )
         }
     }
@@ -266,6 +280,13 @@ private fun RenderModalLayers(
         val entryId = presentation.layer.entry.id
         val exitToken = (presentation as? PresentedModalLayer.Exiting)?.token
         key(entryId) {
+            if (exitToken != null) {
+                DisposableEffect(exitToken) {
+                    onDispose {
+                        onExitFinished(exitToken)
+                    }
+                }
+            }
             modalLayer.screen.ModalContent(
                 targetState = when (presentation) {
                     is PresentedModalLayer.Desired -> ModalScreenState.Shown
