@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import com.shmakov.udf.UdfApp.Companion.appState
+import com.shmakov.udf.UdfApp
 import com.shmakov.udf.composable.common.AnimatedNavigation
 import com.shmakov.udf.navigation.*
 
@@ -19,7 +19,7 @@ import com.shmakov.udf.navigation.*
 fun HomeScreenContent(
     currentEntry: BackStackEntry,
     nestedEntries: List<BackStackEntry>,
-    lastNavActionType: NavActionType,
+    navTransition: NavTransitionIntent?,
 ) {
     Column(
         modifier = Modifier
@@ -46,7 +46,7 @@ fun HomeScreenContent(
             AnimatedNavigation(
                 entries = nestedEntries,
                 into = RenderSlot.Nested(currentEntry.id),
-                lastNavActionType = lastNavActionType,
+                navTransition = navTransition,
             )
         }
     }
@@ -71,28 +71,14 @@ fun Buttons(
     }
 }
 
-// TODO: move to reducer
 private fun navigateTo(
     currentEntry: BackStackEntry,
     targetRoute: ContentRoute,
 ) {
-    val currentEntryIndex = appState.navState.entries.indexOfFirst {
-        it.id == currentEntry.id
-    }
-
-    if (currentEntryIndex == -1) return
-
-    val navActionType = if (currentEntryIndex == appState.navState.entries.lastIndex) {
-        NavActionType.Push
-    } else {
-        NavActionType.Replace
-    }
-
-    appState = appState.copy(
-        navState = NavState.fromEntries(
-            appState.navState.entries.take(currentEntryIndex + 1) +
-                BackStackEntry.create(targetRoute),
-        ).requireValid(),
-        lastNavActionType = navActionType,
+    UdfApp.dispatchNavigation(
+        NavAction.navigateFrom(
+            sourceId = currentEntry.id,
+            route = targetRoute,
+        ),
     )
 }

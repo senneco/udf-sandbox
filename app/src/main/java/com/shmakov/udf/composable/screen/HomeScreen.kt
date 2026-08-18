@@ -5,7 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalConfiguration
 import com.shmakov.udf.composable.content.HomeScreenContent
 import com.shmakov.udf.navigation.BackStackEntry
-import com.shmakov.udf.navigation.NavActionType
+import com.shmakov.udf.navigation.NavTransitionIntent
 import com.shmakov.udf.navigation.RenderSlot
 import com.shmakov.udf.navigation.Screen
 
@@ -32,12 +32,12 @@ class HomeScreen(
     @Composable
     override fun Content(
         nestedEntries: List<BackStackEntry>,
-        lastNavActionType: NavActionType,
+        navTransition: NavTransitionIntent?,
     ) {
         HomeScreenContent(
             currentEntry = entry,
             nestedEntries = nestedEntries,
-            lastNavActionType = lastNavActionType,
+            navTransition = navTransition,
         )
     }
 }

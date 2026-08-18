@@ -11,7 +11,7 @@ class AccountDetailsScreen(
     @Composable
     override fun Content(
         nestedEntries: List<BackStackEntry>,
-        lastNavActionType: NavActionType,
+        navTransition: NavTransitionIntent?,
     ) {
         val route = entry.route as AccountDetails
 

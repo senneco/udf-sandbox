@@ -15,7 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import com.shmakov.udf.UdfApp.Companion.appState
+import com.shmakov.udf.UdfApp
 import com.shmakov.udf.composable.screen.AccountBottomSheet
 import com.shmakov.udf.composable.screen.AccountDetailsScreen
 import com.shmakov.udf.composable.screen.AccountsScreen
@@ -32,23 +32,23 @@ import com.shmakov.udf.navigation.Home
 import com.shmakov.udf.navigation.ModalRoute
 import com.shmakov.udf.navigation.ModalScreen
 import com.shmakov.udf.navigation.ModalScreenState
-import com.shmakov.udf.navigation.NavActionType
+import com.shmakov.udf.navigation.NavAction
 import com.shmakov.udf.navigation.NavState
+import com.shmakov.udf.navigation.NavTransitionIntent
 import com.shmakov.udf.navigation.RenderSlot
 import com.shmakov.udf.navigation.Screen
 import com.shmakov.udf.navigation.Transactions
-import com.shmakov.udf.navigation.requireValid
 import java.util.concurrent.atomic.AtomicReference
 
 @Composable
 fun AnimatedNavigation(
     navState: NavState,
-    lastNavActionType: NavActionType,
+    navTransition: NavTransitionIntent?,
 ) {
     AnimatedNavigation(
         entries = navState.entries,
         into = RenderSlot.Root,
-        lastNavActionType = lastNavActionType,
+        navTransition = navTransition,
     )
 }
 
@@ -56,7 +56,7 @@ fun AnimatedNavigation(
 internal fun AnimatedNavigation(
     entries: List<BackStackEntry>,
     into: RenderSlot,
-    lastNavActionType: NavActionType,
+    navTransition: NavTransitionIntent?,
 ) {
     val rootEntry = entries.firstOrNull() ?: return
 
@@ -95,18 +95,24 @@ internal fun AnimatedNavigation(
         } ?: rootEntry
 
     val finalEnter: AnimatedContentScope<BackStackEntry>.() -> EnterTransition = {
-        when (lastNavActionType) {
-            NavActionType.Push -> appPushEnterTransition
-            NavActionType.Pop -> appPopEnterTransition
-            NavActionType.Replace -> appReplaceEnterTransition
+        when (navTransition) {
+            is NavTransitionIntent.Pushed -> appPushEnterTransition
+            is NavTransitionIntent.Popped,
+            is NavTransitionIntent.ModalDismissed -> appPopEnterTransition
+            is NavTransitionIntent.BranchReplaced,
+            is NavTransitionIntent.HistoryReplaced,
+            null -> appReplaceEnterTransition
         }
     }
 
     val finalExit: AnimatedContentScope<BackStackEntry>.() -> ExitTransition = {
-        when (lastNavActionType) {
-            NavActionType.Push -> appPushExitTransition
-            NavActionType.Pop -> appPopExitTransition
-            NavActionType.Replace -> appReplaceExitTransition
+        when (navTransition) {
+            is NavTransitionIntent.Pushed -> appPushExitTransition
+            is NavTransitionIntent.Popped,
+            is NavTransitionIntent.ModalDismissed -> appPopExitTransition
+            is NavTransitionIntent.BranchReplaced,
+            is NavTransitionIntent.HistoryReplaced,
+            null -> appReplaceExitTransition
         }
     }
 
@@ -126,7 +132,7 @@ internal fun AnimatedNavigation(
 
         getContentScreen(entry).Content(
             nestedEntries = nestedEntries,
-            lastNavActionType = lastNavActionType,
+            navTransition = navTransition,
         )
 
         val modalEntries = entries
@@ -176,14 +182,7 @@ internal fun AnimatedNavigation(
                             items.filterNot { it.id == item.id }
                         }
 
-                        val currentState = appState
-                        appState = currentState.copy(
-                            navState = NavState.fromEntries(
-                                currentState.navState.entries.filterNot {
-                                    it.id == item.id
-                                },
-                            ).requireValid(),
-                        )
+                        UdfApp.dispatchNavigation(NavAction.DismissModal(item.id))
                     },
                 )
             }

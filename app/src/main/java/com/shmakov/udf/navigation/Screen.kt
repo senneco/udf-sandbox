@@ -17,7 +17,7 @@ abstract class Screen(
     @Composable
     abstract fun Content(
         nestedEntries: List<BackStackEntry>,
-        lastNavActionType: NavActionType,
+        navTransition: NavTransitionIntent?,
     )
 }
 
