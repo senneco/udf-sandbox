@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -35,6 +36,7 @@ import com.shmakov.udf.navigation.NavigationLayoutPolicy
 import com.shmakov.udf.navigation.NavigationRenderTree
 import com.shmakov.udf.navigation.Route
 import com.shmakov.udf.navigation.Screen
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -150,6 +152,228 @@ class AnimatedNavigationRegressionTest {
             .assertCountEquals(1)
     }
 
+    @Test
+    fun batchModalChangesRetainEveryExitAndSeparateRequestFromCompletion() {
+        composeRule.mainClock.autoAdvance = false
+        val home = entry("home", Home)
+        val first = entry("account-1", Account(accountId = 1))
+        val second = entry("account-2", Account(accountId = 2))
+        val third = entry("account-3", Account(accountId = 3))
+        val currentTarget = mutableStateOf(
+            target(
+                revision = 0,
+                tree = project(state(home, first), singlePane),
+                transition = null,
+            ),
+        )
+        val probe = ModalLifecycleProbe()
+        val navigationActions = mutableListOf<NavAction>()
+
+        composeRule.setContent {
+            AnimatedNavigation(
+                renderTarget = currentTarget.value,
+                onNavigationAction = navigationActions::add,
+                destinationCatalog = ProbedDestinationCatalog(probe),
+            )
+        }
+        composeRule.waitForIdle()
+
+        assertModalCount(first.id, 1)
+        assertModalCount(second.id, 0)
+        assertModalCount(third.id, 0)
+        assertEquals(ModalScreenState.Shown, probe.targetState(first.id))
+
+        composeRule.runOnIdle {
+            currentTarget.value = target(
+                revision = 1,
+                tree = project(state(home, first, second, third), singlePane),
+                transition = NavTransitionIntent.HistoryReplaced(
+                    previousTopEntryId = first.id,
+                    targetTopEntryId = third.id,
+                ),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(first.id, 1)
+        assertModalCount(second.id, 1)
+        assertModalCount(third.id, 1)
+        assertEquals(ModalScreenState.Shown, probe.targetState(first.id))
+        assertEquals(ModalScreenState.Shown, probe.targetState(second.id))
+        assertEquals(ModalScreenState.Shown, probe.targetState(third.id))
+
+        composeRule.runOnIdle {
+            probe.requestDismiss(second.id)
+        }
+        assertEquals(listOf(NavAction.dismissModal(second.id)), navigationActions)
+        navigationActions.clear()
+
+        composeRule.runOnIdle {
+            currentTarget.value = target(
+                revision = 2,
+                tree = project(state(home, first), singlePane),
+                transition = NavTransitionIntent.HistoryReplaced(
+                    previousTopEntryId = third.id,
+                    targetTopEntryId = first.id,
+                ),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(first.id, 1)
+        assertModalCount(second.id, 1)
+        assertModalCount(third.id, 1)
+        assertEquals(ModalScreenState.Shown, probe.targetState(first.id))
+        assertEquals(ModalScreenState.Hidden, probe.targetState(second.id))
+        assertEquals(ModalScreenState.Hidden, probe.targetState(third.id))
+        composeRule.runOnIdle {
+            probe.requestDismiss(second.id)
+        }
+        assertEquals(emptyList<NavAction>(), navigationActions)
+
+        val secondExitFinished = probe.exitFinishedCallback(second.id)
+        val thirdExitFinished = probe.exitFinishedCallback(third.id)
+        composeRule.runOnIdle {
+            secondExitFinished()
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(first.id, 1)
+        assertModalCount(second.id, 0)
+        assertModalCount(third.id, 1)
+        assertEquals(ModalScreenState.Hidden, probe.targetState(third.id))
+        assertEquals(emptyList<NavAction>(), navigationActions)
+
+        composeRule.runOnIdle {
+            secondExitFinished()
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+        assertModalCount(second.id, 0)
+        assertModalCount(third.id, 1)
+        assertEquals(emptyList<NavAction>(), navigationActions)
+
+        composeRule.runOnIdle {
+            thirdExitFinished()
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(first.id, 1)
+        assertModalCount(second.id, 0)
+        assertModalCount(third.id, 0)
+        assertEquals(emptyList<NavAction>(), navigationActions)
+    }
+
+    @Test
+    fun staleExitCompletionCannotReleaseReaddedOrNewlyExitingSameEntryId() {
+        composeRule.mainClock.autoAdvance = false
+        val home = entry("home-aba", Home)
+        val modal = entry("account-aba", Account(accountId = 8))
+        val currentTarget = mutableStateOf(
+            target(
+                revision = 100,
+                tree = project(state(home, modal), singlePane),
+                transition = null,
+            ),
+        )
+        val probe = ModalLifecycleProbe()
+        val navigationActions = mutableListOf<NavAction>()
+
+        composeRule.setContent {
+            AnimatedNavigation(
+                renderTarget = currentTarget.value,
+                onNavigationAction = navigationActions::add,
+                destinationCatalog = ProbedDestinationCatalog(probe),
+            )
+        }
+        composeRule.waitForIdle()
+
+        assertModalCount(modal.id, 1)
+        assertEquals(ModalScreenState.Shown, probe.targetState(modal.id))
+
+        composeRule.runOnIdle {
+            currentTarget.value = target(
+                revision = 101,
+                tree = project(state(home), singlePane),
+                transition = NavTransitionIntent.ModalDismissed(modal.id),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(modal.id, 1)
+        assertEquals(ModalScreenState.Hidden, probe.targetState(modal.id))
+        val firstExitFinished = probe.exitFinishedCallback(modal.id)
+
+        composeRule.runOnIdle {
+            currentTarget.value = target(
+                revision = 102,
+                tree = project(state(home, modal), singlePane),
+                transition = NavTransitionIntent.Pushed(
+                    fromEntryId = home.id,
+                    addedEntryId = modal.id,
+                ),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(modal.id, 1)
+        assertEquals(ModalScreenState.Shown, probe.targetState(modal.id))
+
+        composeRule.runOnIdle {
+            firstExitFinished()
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(modal.id, 1)
+        assertEquals(ModalScreenState.Shown, probe.targetState(modal.id))
+        assertEquals(emptyList<NavAction>(), navigationActions)
+
+        composeRule.runOnIdle {
+            currentTarget.value = target(
+                revision = 103,
+                tree = project(state(home), singlePane),
+                transition = NavTransitionIntent.ModalDismissed(modal.id),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(modal.id, 1)
+        assertEquals(ModalScreenState.Hidden, probe.targetState(modal.id))
+        val secondExitFinished = probe.exitFinishedCallback(modal.id)
+
+        composeRule.runOnIdle {
+            firstExitFinished()
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(modal.id, 1)
+        assertEquals(ModalScreenState.Hidden, probe.targetState(modal.id))
+        assertEquals(emptyList<NavAction>(), navigationActions)
+
+        composeRule.runOnIdle {
+            secondExitFinished()
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(modal.id, 0)
+        assertEquals(emptyList<NavAction>(), navigationActions)
+    }
+
+    private fun assertModalCount(entryId: EntryId, expectedCount: Int) {
+        composeRule.onAllNodesWithTag(modalTag(entryId), useUnmergedTree = true)
+            .assertCountEquals(expectedCount)
+    }
+
     private fun target(
         revision: Long,
         tree: NavigationRenderTree,
@@ -231,7 +455,8 @@ private class TaggedModalScreen(
     @Composable
     override fun ModalContent(
         targetState: ModalScreenState,
-        onHide: () -> Unit,
+        onDismissRequest: () -> Unit,
+        onExitFinished: () -> Unit,
         onNavigationAction: (NavAction) -> Unit,
     ) {
         Box(
@@ -240,4 +465,70 @@ private class TaggedModalScreen(
                 .testTag("modal:${entry.id.value}"),
         )
     }
+}
+
+private class ProbedDestinationCatalog(
+    private val probe: ModalLifecycleProbe,
+) : DestinationCatalog {
+    override fun resolve(entry: BackStackEntry): DestinationBinding = when (entry.route) {
+        is ContentRoute -> DestinationBinding.Content(TaggedContentScreen(entry))
+        is ModalRoute -> DestinationBinding.Modal(ProbedModalScreen(entry, probe))
+        else -> DestinationBinding.Unsupported(entry)
+    }
+}
+
+private class ProbedModalScreen(
+    override val entry: BackStackEntry,
+    private val probe: ModalLifecycleProbe,
+) : ModalScreen(entry) {
+    @Composable
+    override fun ModalContent(
+        targetState: ModalScreenState,
+        onDismissRequest: () -> Unit,
+        onExitFinished: () -> Unit,
+        onNavigationAction: (NavAction) -> Unit,
+    ) {
+        SideEffect {
+            probe.record(
+                entryId = entry.id,
+                targetState = targetState,
+                onDismissRequest = onDismissRequest,
+                onExitFinished = onExitFinished,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .testTag("modal:${entry.id.value}"),
+        )
+    }
+}
+
+private class ModalLifecycleProbe {
+    private val targetStates = mutableMapOf<EntryId, ModalScreenState>()
+    private val dismissRequests = mutableMapOf<EntryId, () -> Unit>()
+    private val exitFinishedCallbacks = mutableMapOf<EntryId, () -> Unit>()
+
+    fun record(
+        entryId: EntryId,
+        targetState: ModalScreenState,
+        onDismissRequest: () -> Unit,
+        onExitFinished: () -> Unit,
+    ) {
+        targetStates[entryId] = targetState
+        dismissRequests[entryId] = onDismissRequest
+        exitFinishedCallbacks[entryId] = onExitFinished
+    }
+
+    fun targetState(entryId: EntryId): ModalScreenState =
+        checkNotNull(targetStates[entryId]) { "No target state recorded for $entryId" }
+
+    fun requestDismiss(entryId: EntryId) {
+        checkNotNull(dismissRequests[entryId]) { "No dismiss callback recorded for $entryId" }()
+    }
+
+    fun exitFinishedCallback(entryId: EntryId): () -> Unit =
+        checkNotNull(exitFinishedCallbacks[entryId]) {
+            "No exit-finished callback recorded for $entryId"
+        }
 }

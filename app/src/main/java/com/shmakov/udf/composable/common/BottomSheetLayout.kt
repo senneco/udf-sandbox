@@ -4,7 +4,7 @@ import androidx.compose.animation.core.TweenSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.BottomSheetDefaults
@@ -16,46 +16,73 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import com.shmakov.udf.navigation.ModalScreenState
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BottomSheetLayout(
     targetState: ModalScreenState,
-    onHide: () -> Unit,
+    onDismissRequest: () -> Unit,
+    onExitFinished: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
+    val currentTargetState by rememberUpdatedState(targetState)
+    val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
+    val currentOnExitFinished by rememberUpdatedState(onExitFinished)
+    // Every accepted Shown -> Hidden lifecycle gets its own exactly-once completion guard.
+    var exitCompletionReported by remember(targetState) { mutableStateOf(false) }
 
     val bottomSheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
+        confirmValueChange = { nextValue ->
+            if (
+                nextValue == SheetValue.Hidden &&
+                currentTargetState == ModalScreenState.Shown
+            ) {
+                currentOnDismissRequest()
+                false
+            } else {
+                true
+            }
+        },
     )
 
-    val animateToDismiss: () -> Unit = {
-        scope.launch { bottomSheetState.hide() }
+    val requestDismiss: () -> Unit = {
+        if (currentTargetState == ModalScreenState.Shown) {
+            currentOnDismissRequest()
+        }
+    }
+    val finishExitOnce: () -> Unit = {
+        if (!exitCompletionReported) {
+            exitCompletionReported = true
+            currentOnExitFinished()
+        }
     }
 
     val scaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = bottomSheetState,
     )
 
-    //Little, but useful optimization
+    // A durable Hidden target can arrive while the sheet is already invisible (for example during
+    // a rapid Shown -> Hidden cycle). Complete that exit after composition instead of leaving an
+    // invisible modal layer mounted over the destination below it.
     if (targetState == ModalScreenState.Hidden && !bottomSheetState.isVisible) {
+        LaunchedEffect(targetState, bottomSheetState) {
+            finishExitOnce()
+        }
         return
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val fullHeight = constraints.maxHeight
-
+    Box(Modifier.fillMaxSize()) {
         BottomSheetScaffold(
             sheetContent = content,
             scaffoldState = scaffoldState,
@@ -63,33 +90,22 @@ fun BottomSheetLayout(
         ) {
             Scrim(
                 color = BottomSheetDefaults.ScrimColor,
-                onDismissRequest = animateToDismiss,
+                onDismissRequest = requestDismiss,
                 visible = bottomSheetState.targetValue != SheetValue.Hidden,
             )
         }
 
-
-        if (bottomSheetState.currentValue != SheetValue.Hidden && targetState == ModalScreenState.Hidden) {
-            LaunchedEffect(Unit) {
-                scope.launch { bottomSheetState.hide() }
-            }
-        }
-
-        LaunchedEffect(Unit) {
-            scope.launch {
-                bottomSheetState.show()
-            }
-
-            // We can't watch only on hidden state, because if we hide bottom sheet while it's in
-            // showing animation, then current state is already Hidden and we can't determine, when
-            // hide animation will be completed
-            snapshotFlow { bottomSheetState.requireOffset() }
-                .drop(1)
-                .collect { offset ->
-                    if (offset == fullHeight.toFloat()) {
-                        onHide()
-                    }
+        LaunchedEffect(targetState, bottomSheetState) {
+            when (targetState) {
+                ModalScreenState.Shown -> {
+                    bottomSheetState.show()
                 }
+
+                ModalScreenState.Hidden -> {
+                    bottomSheetState.hide()
+                    finishExitOnce()
+                }
+            }
         }
     }
 }

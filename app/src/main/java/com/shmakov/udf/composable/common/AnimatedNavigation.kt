@@ -11,18 +11,25 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.shmakov.udf.ModalExitCompletion
+import com.shmakov.udf.ModalExitToken
+import com.shmakov.udf.ModalPresentationPlanner
+import com.shmakov.udf.ModalPresentationState
 import com.shmakov.udf.NavigationContentMotion
 import com.shmakov.udf.NavigationPresentationPlanner
 import com.shmakov.udf.NavigationRenderTarget
+import com.shmakov.udf.PresentedModalLayer
 import com.shmakov.udf.renderIdentity
 import com.shmakov.udf.navigation.ContentSlotId
 import com.shmakov.udf.navigation.EntryId
 import com.shmakov.udf.navigation.ModalScreenState
 import com.shmakov.udf.navigation.NavAction
-import java.util.concurrent.atomic.AtomicReference
 
 /** Renders one atomically projected navigation revision. */
 @Composable
@@ -67,11 +74,110 @@ internal fun AnimatedNavigation(
         transitionSpec = { navigationContentTransform() },
         contentKey = { state -> state.tree.root.slot.renderIdentity },
     ) { branchState ->
-        RenderContentSlot(
+        RenderNavigationBranch(
             branchState = branchState,
-            contentSlot = branchState.tree.root,
             onNavigationAction = onNavigationAction,
         )
+    }
+}
+
+@Composable
+private fun RenderNavigationBranch(
+    branchState: BoundRenderState,
+    onNavigationAction: (NavAction) -> Unit,
+) {
+    val desiredModalLayers = branchState.tree.modalLayers.map { layer -> layer.layer }
+    val presentationHolder = remember {
+        val initialState = ModalPresentationPlanner.start(
+            navigationRevision = branchState.renderTarget.navigationRevision,
+            desired = desiredModalLayers,
+        )
+        ModalPresentationHolder(
+            AcceptedModalPresentation(
+                state = initialState,
+                layers = branchState.tree.modalLayers.map { layer ->
+                    BoundPresentedModalLayer(
+                        presentation = PresentedModalLayer.Desired(layer.layer),
+                        screen = layer.screen,
+                    )
+                },
+            ),
+        )
+    }
+    val acceptedPresentation = presentationHolder.accepted
+    val candidateState = ModalPresentationPlanner.reconcile(
+        previous = acceptedPresentation.state,
+        navigationRevision = branchState.renderTarget.navigationRevision,
+        desired = desiredModalLayers,
+    ).state
+    val candidateLayers = when (
+        val binding = DestinationTreeBinder.materializePresentedModalLayers(
+            layers = candidateState.layers,
+            desiredLayers = branchState.tree.modalLayers,
+            acceptedLayers = acceptedPresentation.layers,
+        )
+    ) {
+        is PresentedModalLayersBindingResult.Success -> binding.layers
+        is PresentedModalLayersBindingResult.Failure -> {
+            DestinationBindingFailure(binding.problem)
+            return
+        }
+    }
+    val candidatePresentation = AcceptedModalPresentation(
+        state = candidateState,
+        layers = candidateLayers,
+    )
+
+    SideEffect {
+        presentationHolder.accept(candidatePresentation)
+    }
+
+    RenderContentSlot(
+        branchState = branchState,
+        contentSlot = branchState.tree.root,
+        onNavigationAction = onNavigationAction,
+    )
+    RenderModalLayers(
+        modalLayers = candidateLayers,
+        onNavigationAction = onNavigationAction,
+        onExitFinished = presentationHolder::completeExit,
+    )
+}
+
+private data class AcceptedModalPresentation(
+    val state: ModalPresentationState,
+    val layers: List<BoundPresentedModalLayer>,
+)
+
+private class ModalPresentationHolder(
+    initial: AcceptedModalPresentation,
+) {
+    var accepted: AcceptedModalPresentation by mutableStateOf(initial)
+        private set
+
+    fun accept(candidate: AcceptedModalPresentation) {
+        if (accepted != candidate) {
+            accepted = candidate
+        }
+    }
+
+    fun completeExit(token: ModalExitToken) {
+        val previous = accepted
+        when (val completion = ModalPresentationPlanner.completeExit(previous.state, token)) {
+            is ModalExitCompletion.Applied -> {
+                val remainingLayers = previous.layers.filterNot { layer ->
+                    val presentation = layer.presentation
+                    presentation is PresentedModalLayer.Exiting &&
+                        presentation.token == token
+                }
+                accepted = AcceptedModalPresentation(
+                    state = completion.state,
+                    layers = remainingLayers,
+                )
+            }
+
+            is ModalExitCompletion.Unchanged -> Unit
+        }
     }
 }
 
@@ -103,13 +209,6 @@ private fun RenderContentSlot(
                 ownerContentEntryId = contentSlot.slot.entry.id,
                 onNavigationAction = onNavigationAction,
             )
-        },
-        onNavigationAction = onNavigationAction,
-    )
-
-    RenderModalLayers(
-        modalLayers = branchState.tree.modalLayers.filter { layer ->
-            layer.layer.ownerContentEntryId == contentSlot.slot.entry.id
         },
         onNavigationAction = onNavigationAction,
     )
@@ -158,58 +257,34 @@ private fun BoundNavigationRenderTree.childOf(
 
 @Composable
 private fun RenderModalLayers(
-    modalLayers: List<BoundModalLayer>,
+    modalLayers: List<BoundPresentedModalLayer>,
     onNavigationAction: (NavAction) -> Unit,
+    onExitFinished: (ModalExitToken) -> Unit,
 ) {
-    // Retained-modal planning is intentionally left to #14. This preserves the legacy behavior
-    // while sourcing every desired modal from the branch's own immutable projection.
-    val rememberedModalLayers = remember {
-        AtomicReference(emptyList<BoundModalLayer>())
-    }
-    val lastModalLayers = rememberedModalLayers.get()
-    val allLayers = mutableListOf<BoundModalLayer>()
-    var lastIndex = 0
-    var lastNewIndex = modalLayers.size
-
-    modalLayers.forEachIndexed { index, modalLayer ->
-        val indexInLast = lastModalLayers.indexOfFirst {
-            it.layer.entry.id == modalLayer.layer.entry.id
-        }
-
-        if (indexInLast != -1) {
-            allLayers += lastModalLayers.subList(lastIndex, indexInLast)
-            allLayers += modalLayer
-            lastIndex = indexInLast + 1
-        } else {
-            lastNewIndex = index
-            return@forEachIndexed
-        }
-    }
-
-    allLayers += lastModalLayers.drop(lastIndex)
-    allLayers += modalLayers.drop(lastNewIndex)
-
-    allLayers.forEach { modalLayer ->
-        val entryId = modalLayer.layer.entry.id
+    modalLayers.forEach { modalLayer ->
+        val presentation = modalLayer.presentation
+        val entryId = presentation.layer.entry.id
+        val exitToken = (presentation as? PresentedModalLayer.Exiting)?.token
         key(entryId) {
             modalLayer.screen.ModalContent(
-                targetState = if (modalLayers.any { it.layer.entry.id == entryId }) {
-                    ModalScreenState.Shown
-                } else {
-                    ModalScreenState.Hidden
+                targetState = when (presentation) {
+                    is PresentedModalLayer.Desired -> ModalScreenState.Shown
+                    is PresentedModalLayer.Exiting -> ModalScreenState.Hidden
                 },
-                onHide = {
-                    rememberedModalLayers.getAndUpdate { layers ->
-                        layers.filterNot { it.layer.entry.id == entryId }
+                onDismissRequest = {
+                    if (presentation is PresentedModalLayer.Desired) {
+                        onNavigationAction(NavAction.dismissModal(entryId))
                     }
-                    onNavigationAction(NavAction.dismissModal(entryId))
+                },
+                onExitFinished = {
+                    if (exitToken != null) {
+                        onExitFinished(exitToken)
+                    }
                 },
                 onNavigationAction = onNavigationAction,
             )
         }
     }
-
-    rememberedModalLayers.set(modalLayers)
 }
 
 private fun AnimatedContentTransitionScope<BoundRenderState>.navigationContentTransform():

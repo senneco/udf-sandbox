@@ -1,5 +1,6 @@
 package com.shmakov.udf.composable.common
 
+import com.shmakov.udf.PresentedModalLayer
 import com.shmakov.udf.navigation.BackStackEntry
 import com.shmakov.udf.navigation.ContentSlot
 import com.shmakov.udf.navigation.ModalLayer
@@ -55,6 +56,10 @@ internal sealed class DestinationTreeBindingProblem {
         val expectedKind: DestinationKind,
         val error: DestinationCatalogError,
     ) : DestinationTreeBindingProblem()
+
+    data class MissingPresentationBinding(
+        val entry: BackStackEntry,
+    ) : DestinationTreeBindingProblem()
 }
 
 internal data class BoundContentSlot(
@@ -66,6 +71,23 @@ internal data class BoundModalLayer(
     val layer: ModalLayer,
     val screen: ModalScreen,
 )
+
+internal data class BoundPresentedModalLayer(
+    val presentation: PresentedModalLayer,
+    val screen: ModalScreen,
+)
+
+internal sealed class PresentedModalLayersBindingResult {
+    class Success(
+        layers: List<BoundPresentedModalLayer>,
+    ) : PresentedModalLayersBindingResult() {
+        val layers: List<BoundPresentedModalLayer> = bindingImmutableListCopy(layers)
+    }
+
+    data class Failure(
+        val problem: DestinationTreeBindingProblem,
+    ) : PresentedModalLayersBindingResult()
+}
 
 /** Immutable projection whose every destination was resolved before a composable is called. */
 internal class BoundNavigationRenderTree private constructor(
@@ -152,6 +174,39 @@ internal object DestinationTreeBinder {
                 modalLayers = modalLayers,
             ),
         )
+    }
+
+    /**
+     * Materializes a complete presentation set without resolving a removed destination again.
+     * Desired entries use the current tree binding; exiting entries retain their accepted binding.
+     */
+    fun materializePresentedModalLayers(
+        layers: List<PresentedModalLayer>,
+        desiredLayers: List<BoundModalLayer>,
+        acceptedLayers: List<BoundPresentedModalLayer>,
+    ): PresentedModalLayersBindingResult {
+        val desiredById = desiredLayers.associateBy { layer -> layer.layer.entry.id }
+        val acceptedById = acceptedLayers.associateBy { layer ->
+            layer.presentation.layer.entry.id
+        }
+        val boundLayers = ArrayList<BoundPresentedModalLayer>(layers.size)
+        layers.forEach { presentation ->
+            val entryId = presentation.layer.entry.id
+            val screen = when (presentation) {
+                is PresentedModalLayer.Desired -> desiredById[entryId]?.screen
+                is PresentedModalLayer.Exiting -> acceptedById[entryId]?.screen
+            }
+            if (screen == null) {
+                return PresentedModalLayersBindingResult.Failure(
+                    DestinationTreeBindingProblem.MissingPresentationBinding(
+                        entry = presentation.layer.entry,
+                    ),
+                )
+            }
+            boundLayers += BoundPresentedModalLayer(presentation, screen)
+        }
+
+        return PresentedModalLayersBindingResult.Success(boundLayers)
     }
 }
 
