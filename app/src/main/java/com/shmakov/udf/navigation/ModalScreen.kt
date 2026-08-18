@@ -10,6 +10,7 @@ abstract class ModalScreen(
     abstract fun ModalContent(
         targetState: ModalScreenState,
         onHide: () -> Unit,
+        onNavigationAction: (NavAction) -> Unit,
     )
 }
 

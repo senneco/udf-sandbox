@@ -18,6 +18,7 @@ abstract class Screen(
     abstract fun Content(
         nestedEntries: List<BackStackEntry>,
         navTransition: NavTransitionIntent?,
+        onNavigationAction: (NavAction) -> Unit,
     )
 }
 

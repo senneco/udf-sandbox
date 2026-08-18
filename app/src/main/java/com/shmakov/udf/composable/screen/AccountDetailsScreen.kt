@@ -12,6 +12,7 @@ class AccountDetailsScreen(
     override fun Content(
         nestedEntries: List<BackStackEntry>,
         navTransition: NavTransitionIntent?,
+        onNavigationAction: (NavAction) -> Unit,
     ) {
         val route = entry.route as AccountDetails
 

@@ -11,16 +11,19 @@ abstract class BottomSheet(
     @Composable
     override fun ModalContent(
         targetState: ModalScreenState,
-        onHide: () -> Unit
+        onHide: () -> Unit,
+        onNavigationAction: (NavAction) -> Unit,
     ) {
         BottomSheetLayout(
             targetState = targetState,
             onHide = onHide,
         ) {
-            Content()
+            Content(onNavigationAction = onNavigationAction)
         }
     }
 
     @Composable
-    abstract fun ColumnScope.Content()
+    abstract fun ColumnScope.Content(
+        onNavigationAction: (NavAction) -> Unit,
+    )
 }

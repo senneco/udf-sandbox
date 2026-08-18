@@ -15,7 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import com.shmakov.udf.UdfApp
 import com.shmakov.udf.composable.screen.AccountBottomSheet
 import com.shmakov.udf.composable.screen.AccountDetailsScreen
 import com.shmakov.udf.composable.screen.AccountsScreen
@@ -44,11 +43,13 @@ import java.util.concurrent.atomic.AtomicReference
 fun AnimatedNavigation(
     navState: NavState,
     navTransition: NavTransitionIntent?,
+    onNavigationAction: (NavAction) -> Unit,
 ) {
     AnimatedNavigation(
         entries = navState.entries,
         into = RenderSlot.Root,
         navTransition = navTransition,
+        onNavigationAction = onNavigationAction,
     )
 }
 
@@ -57,6 +58,7 @@ internal fun AnimatedNavigation(
     entries: List<BackStackEntry>,
     into: RenderSlot,
     navTransition: NavTransitionIntent?,
+    onNavigationAction: (NavAction) -> Unit,
 ) {
     val rootEntry = entries.firstOrNull() ?: return
 
@@ -133,6 +135,7 @@ internal fun AnimatedNavigation(
         getContentScreen(entry).Content(
             nestedEntries = nestedEntries,
             navTransition = navTransition,
+            onNavigationAction = onNavigationAction,
         )
 
         val modalEntries = entries
@@ -182,8 +185,9 @@ internal fun AnimatedNavigation(
                             items.filterNot { it.id == item.id }
                         }
 
-                        UdfApp.dispatchNavigation(NavAction.DismissModal(item.id))
+                        onNavigationAction(NavAction.dismissModal(item.id))
                     },
+                    onNavigationAction = onNavigationAction,
                 )
             }
         }
