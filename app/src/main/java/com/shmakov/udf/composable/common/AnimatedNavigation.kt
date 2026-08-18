@@ -29,6 +29,7 @@ import com.shmakov.udf.PresentedModalLayer
 import com.shmakov.udf.renderIdentity
 import com.shmakov.udf.navigation.ContentSlotId
 import com.shmakov.udf.navigation.EntryId
+import com.shmakov.udf.navigation.ModalEntrance
 import com.shmakov.udf.navigation.ModalScreenState
 import com.shmakov.udf.navigation.NavAction
 
@@ -98,7 +99,10 @@ private fun RenderNavigationBranch(
                 state = initialState,
                 layers = branchState.tree.modalLayers.map { layer ->
                     BoundPresentedModalLayer(
-                        presentation = PresentedModalLayer.Desired(layer.layer),
+                        presentation = PresentedModalLayer.Desired(
+                            layer = layer.layer,
+                            entrance = ModalEntrance.Snap,
+                        ),
                         screen = layer.screen,
                     )
                 },
@@ -291,6 +295,10 @@ private fun RenderModalLayers(
                 targetState = when (presentation) {
                     is PresentedModalLayer.Desired -> ModalScreenState.Shown
                     is PresentedModalLayer.Exiting -> ModalScreenState.Hidden
+                },
+                entrance = when (presentation) {
+                    is PresentedModalLayer.Desired -> presentation.entrance
+                    is PresentedModalLayer.Exiting -> ModalEntrance.Snap
                 },
                 onDismissRequest = {
                     if (presentation is PresentedModalLayer.Desired) {

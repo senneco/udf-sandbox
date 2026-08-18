@@ -37,6 +37,7 @@ import com.shmakov.udf.navigation.ContentPlacementDecision
 import com.shmakov.udf.navigation.ContentRoute
 import com.shmakov.udf.navigation.EntryId
 import com.shmakov.udf.navigation.Home
+import com.shmakov.udf.navigation.ModalEntrance
 import com.shmakov.udf.navigation.ModalRoute
 import com.shmakov.udf.navigation.ModalScreen
 import com.shmakov.udf.navigation.ModalScreenState
@@ -199,6 +200,7 @@ class AnimatedNavigationRegressionTest {
         assertModalCount(second.id, 0)
         assertModalCount(third.id, 0)
         assertEquals(ModalScreenState.Shown, probe.targetState(first.id))
+        assertEquals(ModalEntrance.Snap, probe.entrance(first.id))
 
         composeRule.runOnIdle {
             currentTarget.value = target(
@@ -219,6 +221,9 @@ class AnimatedNavigationRegressionTest {
         assertEquals(ModalScreenState.Shown, probe.targetState(first.id))
         assertEquals(ModalScreenState.Shown, probe.targetState(second.id))
         assertEquals(ModalScreenState.Shown, probe.targetState(third.id))
+        assertEquals(ModalEntrance.Snap, probe.entrance(first.id))
+        assertEquals(ModalEntrance.Animate, probe.entrance(second.id))
+        assertEquals(ModalEntrance.Animate, probe.entrance(third.id))
 
         composeRule.runOnIdle {
             probe.requestDismiss(second.id)
@@ -431,6 +436,7 @@ class AnimatedNavigationRegressionTest {
         )
         composeRule.mainClock.advanceTimeByFrame()
         assertModalCount(first.id, 1)
+        assertEquals(ModalEntrance.Snap, probe.entrances[first.id])
 
         composeRule.runOnIdle {
             currentTarget.value = target(
@@ -450,6 +456,12 @@ class AnimatedNavigationRegressionTest {
         assertModalCount(second.id, 1)
         assertEquals(ModalScreenState.Hidden, probe.targetState(first.id))
         assertEquals(ModalScreenState.Shown, probe.targetState(second.id))
+        assertEquals(ModalEntrance.Snap, probe.entrances[first.id])
+        assertEquals(ModalEntrance.Animate, probe.entrances[second.id])
+        assertTrue(
+            "Distinct replacement sheet unexpectedly skipped its Animate entrance",
+            !probe.isExactlyExpanded(second.id),
+        )
         assertEquals(emptyList<EntryId>(), probe.dismissRequests)
         assertEquals(emptyList<NavAction>(), navigationActions)
 
@@ -738,6 +750,7 @@ private class TaggedModalScreen(
     @Composable
     override fun ModalContent(
         targetState: ModalScreenState,
+        entrance: ModalEntrance,
         onDismissRequest: () -> Unit,
         onExitFinished: () -> Unit,
         onNavigationAction: (NavAction) -> Unit,
@@ -767,15 +780,18 @@ private class MaterialBottomSheetModalScreen(
     @Composable
     override fun ModalContent(
         targetState: ModalScreenState,
+        entrance: ModalEntrance,
         onDismissRequest: () -> Unit,
         onExitFinished: () -> Unit,
         onNavigationAction: (NavAction) -> Unit,
     ) {
         SideEffect {
             probe.targetStates[entry.id] = targetState
+            probe.entrances[entry.id] = entrance
         }
         BottomSheetLayout(
             targetState = targetState,
+            entrance = entrance,
             onDismissRequest = {
                 probe.dismissRequests += entry.id
                 onDismissRequest()
@@ -810,6 +826,7 @@ private data class MaterialModalGeometry(
 private class MaterialModalProbe {
     var rootHeightPx: Float = 0f
     val targetStates = mutableMapOf<EntryId, ModalScreenState>()
+    val entrances = mutableMapOf<EntryId, ModalEntrance>()
     val geometry = mutableMapOf<EntryId, MaterialModalGeometry>()
     val dismissRequests = mutableListOf<EntryId>()
     val exitCompletions = mutableListOf<EntryId>()
@@ -844,6 +861,7 @@ private class ProbedModalScreen(
     @Composable
     override fun ModalContent(
         targetState: ModalScreenState,
+        entrance: ModalEntrance,
         onDismissRequest: () -> Unit,
         onExitFinished: () -> Unit,
         onNavigationAction: (NavAction) -> Unit,
@@ -852,6 +870,7 @@ private class ProbedModalScreen(
             probe.record(
                 entryId = entry.id,
                 targetState = targetState,
+                entrance = entrance,
                 onDismissRequest = onDismissRequest,
                 onExitFinished = onExitFinished,
             )
@@ -866,22 +885,28 @@ private class ProbedModalScreen(
 
 private class ModalLifecycleProbe {
     private val targetStates = mutableMapOf<EntryId, ModalScreenState>()
+    private val entrances = mutableMapOf<EntryId, ModalEntrance>()
     private val dismissRequests = mutableMapOf<EntryId, () -> Unit>()
     private val exitFinishedCallbacks = mutableMapOf<EntryId, () -> Unit>()
 
     fun record(
         entryId: EntryId,
         targetState: ModalScreenState,
+        entrance: ModalEntrance,
         onDismissRequest: () -> Unit,
         onExitFinished: () -> Unit,
     ) {
         targetStates[entryId] = targetState
+        entrances[entryId] = entrance
         dismissRequests[entryId] = onDismissRequest
         exitFinishedCallbacks[entryId] = onExitFinished
     }
 
     fun targetState(entryId: EntryId): ModalScreenState =
         checkNotNull(targetStates[entryId]) { "No target state recorded for $entryId" }
+
+    fun entrance(entryId: EntryId): ModalEntrance =
+        checkNotNull(entrances[entryId]) { "No entrance recorded for $entryId" }
 
     fun requestDismiss(entryId: EntryId) {
         checkNotNull(dismissRequests[entryId]) { "No dismiss callback recorded for $entryId" }()

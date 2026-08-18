@@ -3,6 +3,7 @@ package com.shmakov.udf
 import com.shmakov.udf.navigation.NavAction
 import com.shmakov.udf.navigation.NavReducer
 import com.shmakov.udf.navigation.NavReduction
+import com.shmakov.udf.navigation.NavState
 import com.shmakov.udf.navigation.NavTransitionIntent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,7 +22,12 @@ internal data class AppStateFrame(
 )
 
 /** A linearizable owner of application state transitions. */
-internal class AppStore(initialState: AppState) {
+internal class AppStore(
+    initialState: AppState,
+    private val persistNavigationState: (NavState) -> NavigationSaveResult = {
+        NavigationSaveResult.Saved
+    },
+) {
     private val dispatchLock = Any()
 
     private val mutableFrames = MutableStateFlow(
@@ -45,11 +51,16 @@ internal class AppStore(initialState: AppState) {
         val reduction = NavReducer.reduce(currentFrame.appState.navState, action)
 
         if (reduction is NavReduction.Changed) {
-            mutableFrames.value = AppStateFrame(
+            val nextFrame = AppStateFrame(
                 appState = currentFrame.appState.copy(navState = reduction.state),
                 navigationRevision = currentFrame.navigationRevision + 1L,
                 navigationTransition = reduction.transition,
             )
+            // Persistence participates in the same serialization order as reduction and frame
+            // publication. A typed save failure removes stale saved data but does not reject an
+            // otherwise valid in-memory navigation transition.
+            persistNavigationState(reduction.state)
+            mutableFrames.value = nextFrame
         }
 
         reduction

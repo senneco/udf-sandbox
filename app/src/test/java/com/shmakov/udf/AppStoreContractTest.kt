@@ -16,6 +16,7 @@ import com.shmakov.udf.navigation.NavTransitionIntent
 import com.shmakov.udf.navigation.NavUnchangedReason
 import com.shmakov.udf.navigation.Route
 import com.shmakov.udf.navigation.Transactions
+import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -335,6 +336,129 @@ class AppStoreContractTest {
             ),
             store.frames.value.navigationTransition,
         )
+    }
+
+    @Test
+    fun `changed navigation is persisted under the dispatch lock before frame publication`() {
+        val home = entry("home", Home)
+        val accounts = entry("accounts", Accounts)
+        val initial = appState(home)
+        val persistenceStarted = CountDownLatch(1)
+        val allowPersistenceToFinish = CountDownLatch(1)
+        val persistedStates = Collections.synchronizedList(mutableListOf<NavState>())
+        val store = AppStore(
+            initialState = initial,
+            persistNavigationState = { state ->
+                persistenceStarted.countDown()
+                assertTrue(allowPersistenceToFinish.await(5, TimeUnit.SECONDS))
+                persistedStates += state
+                NavigationSaveResult.Saved
+            },
+        )
+        val initialFrame = store.frames.value
+        val executor = Executors.newSingleThreadExecutor()
+
+        try {
+            val dispatch = executor.submit<NavReduction> {
+                store.dispatch(NavAction.Push(home.id, accounts))
+            }
+
+            assertTrue(persistenceStarted.await(5, TimeUnit.SECONDS))
+            assertSame(initialFrame, store.frames.value)
+            assertTrue(persistedStates.isEmpty())
+
+            allowPersistenceToFinish.countDown()
+            val reduction = changed(dispatch.get(5, TimeUnit.SECONDS))
+
+            assertEquals(listOf(reduction.state), persistedStates)
+            assertSame(reduction.state, store.frames.value.appState.navState)
+            assertEquals(1L, store.frames.value.navigationRevision)
+            assertEquals(reduction.transition, store.frames.value.navigationTransition)
+        } finally {
+            allowPersistenceToFinish.countDown()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `persistence failure does not suppress a changed frame revision or intent`() {
+        val home = entry("home", Home)
+        val accounts = entry("accounts", Accounts)
+        val persistedStates = mutableListOf<NavState>()
+        val persistenceFailure = NavigationSaveResult.Failed(
+            listOf(
+                NavigationSaveProblem.SavedStateAccess(
+                    code = "forced_failure",
+                    message = "Persistence is unavailable in this test.",
+                ),
+            ),
+        )
+        val store = AppStore(
+            initialState = appState(home),
+            persistNavigationState = { state ->
+                persistedStates += state
+                persistenceFailure
+            },
+        )
+
+        val reduction = changed(
+            store.dispatch(NavAction.Push(home.id, accounts)),
+        )
+        val frame = store.frames.value
+
+        assertEquals(listOf(reduction.state), persistedStates)
+        assertSame(reduction.state, frame.appState.navState)
+        assertEquals(listOf(home, accounts), frame.appState.navState.entries)
+        assertEquals(1L, frame.navigationRevision)
+        assertEquals(
+            NavTransitionIntent.Pushed(home.id, accounts.id),
+            frame.navigationTransition,
+        )
+        assertEquals(reduction.transition, frame.navigationTransition)
+    }
+
+    @Test
+    fun `unchanged navigation neither persists nor replaces the observable frame`() {
+        var persistenceCalls = 0
+        val store = AppStore(
+            initialState = appState(entry("home", Home)),
+            persistNavigationState = {
+                persistenceCalls += 1
+                NavigationSaveResult.Saved
+            },
+        )
+        val before = store.frames.value
+
+        val reduction = unchanged(store.dispatch(NavAction.Pop))
+
+        assertEquals(NavUnchangedReason.RootProtected, reduction.reason)
+        assertEquals(0, persistenceCalls)
+        assertSame(before, store.frames.value)
+    }
+
+    @Test
+    fun `concurrent changes leave the last persisted navigation equal to the latest frame`() {
+        val home = entry("home", Home)
+        val children = (1..16).map { index -> entry("entry-$index", Accounts) }
+        val persistedStates = Collections.synchronizedList(mutableListOf<NavState>())
+        val store = AppStore(
+            initialState = appState(home, *children.toTypedArray()),
+            persistNavigationState = { state ->
+                persistedStates += state
+                NavigationSaveResult.Saved
+            },
+        )
+
+        val reductions = dispatchConcurrently(
+            store = store,
+            actions = List(32) { NavAction.Pop },
+        )
+
+        assertEquals(16, reductions.count { it is NavReduction.Changed })
+        assertEquals(16, persistedStates.size)
+        assertEquals(16L, store.frames.value.navigationRevision)
+        assertSame(persistedStates.last(), store.frames.value.appState.navState)
+        assertEquals(listOf(home), persistedStates.last().entries)
     }
 
     private fun dispatchConcurrently(
