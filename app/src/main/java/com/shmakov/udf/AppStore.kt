@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 internal data class AppStateFrame(
     val appState: AppState,
+    val navigationRevision: Long,
     val navigationTransition: NavTransitionIntent?,
 )
 
@@ -26,6 +27,7 @@ internal class AppStore(initialState: AppState) {
     private val mutableFrames = MutableStateFlow(
         AppStateFrame(
             appState = initialState,
+            navigationRevision = 0L,
             navigationTransition = null,
         ),
     )
@@ -45,6 +47,7 @@ internal class AppStore(initialState: AppState) {
         if (reduction is NavReduction.Changed) {
             mutableFrames.value = AppStateFrame(
                 appState = currentFrame.appState.copy(navState = reduction.state),
+                navigationRevision = currentFrame.navigationRevision + 1L,
                 navigationTransition = reduction.transition,
             )
         }

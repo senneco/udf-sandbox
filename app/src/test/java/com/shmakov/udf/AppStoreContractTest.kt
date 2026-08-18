@@ -47,6 +47,7 @@ class AppStoreContractTest {
         assertSame(initial, frame.appState)
         assertTrue(frame.appState.showInPlace)
         assertNull(frame.navigationTransition)
+        assertEquals(0L, frame.navigationRevision)
         assertFalse(exposedFrames is MutableStateFlow<*>)
     }
 
@@ -68,6 +69,7 @@ class AppStoreContractTest {
             NavTransitionIntent.Pushed(home.id, accounts.id),
             frame.navigationTransition,
         )
+        assertEquals(1L, frame.navigationRevision)
     }
 
     @Test
@@ -80,6 +82,7 @@ class AppStoreContractTest {
         assertEquals(NavUnchangedReason.RootProtected, reduction.reason)
         assertSame(before.appState.navState, reduction.state)
         assertSame(before, store.frames.value)
+        assertEquals(0L, store.frames.value.navigationRevision)
     }
 
     @Test
@@ -107,6 +110,7 @@ class AppStoreContractTest {
             store.dispatch(NavAction.Push(home.id, accounts)),
         )
         assertEquals(pushAccounts.transition, store.frames.value.navigationTransition)
+        assertEquals(1L, store.frames.value.navigationRevision)
 
         val pushAccount = changed(
             store.dispatch(NavAction.Push(accounts.id, account)),
@@ -116,6 +120,7 @@ class AppStoreContractTest {
             store.frames.value.appState.navState.entries,
         )
         assertEquals(pushAccount.transition, store.frames.value.navigationTransition)
+        assertEquals(2L, store.frames.value.navigationRevision)
 
         val dismissAccount = changed(
             store.dispatch(NavAction.DismissModal(account.id)),
@@ -125,10 +130,12 @@ class AppStoreContractTest {
             store.frames.value.appState.navState.entries,
         )
         assertEquals(dismissAccount.transition, store.frames.value.navigationTransition)
+        assertEquals(3L, store.frames.value.navigationRevision)
 
         val popAccounts = changed(store.dispatch(NavAction.Pop))
         assertEquals(listOf(home), store.frames.value.appState.navState.entries)
         assertEquals(popAccounts.transition, store.frames.value.navigationTransition)
+        assertEquals(4L, store.frames.value.navigationRevision)
         assertTrue(store.frames.value.appState.showInPlace)
     }
 

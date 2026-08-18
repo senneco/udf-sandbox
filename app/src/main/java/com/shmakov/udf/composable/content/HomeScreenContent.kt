@@ -11,16 +11,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import com.shmakov.udf.composable.common.AnimatedNavigation
-import com.shmakov.udf.navigation.*
+import com.shmakov.udf.navigation.Accounts
+import com.shmakov.udf.navigation.Cards
+import com.shmakov.udf.navigation.ContentRoute
+import com.shmakov.udf.navigation.Transactions
 
 @Composable
 fun HomeScreenContent(
-    currentEntry: BackStackEntry,
-    nestedEntries: List<BackStackEntry>,
-    navTransition: NavTransitionIntent?,
+    childContent: @Composable () -> Unit,
     onDestinationSelected: (ContentRoute) -> Unit,
-    onNavigationAction: (NavAction) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -43,14 +42,7 @@ fun HomeScreenContent(
             }
         }
 
-        if (nestedEntries.isNotEmpty()) {
-            AnimatedNavigation(
-                entries = nestedEntries,
-                into = RenderSlot.Nested(currentEntry.id),
-                navTransition = navTransition,
-                onNavigationAction = onNavigationAction,
-            )
-        }
+        childContent()
     }
 }
 

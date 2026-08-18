@@ -5,7 +5,6 @@ import com.shmakov.udf.composable.content.AccountsScreenContent
 import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.BackStackEntry
 import com.shmakov.udf.navigation.NavAction
-import com.shmakov.udf.navigation.NavTransitionIntent
 import com.shmakov.udf.navigation.Screen
 
 class AccountsScreen(
@@ -14,8 +13,7 @@ class AccountsScreen(
 
     @Composable
     override fun Content(
-        nestedEntries: List<BackStackEntry>,
-        navTransition: NavTransitionIntent?,
+        childContent: @Composable () -> Unit,
         onNavigationAction: (NavAction) -> Unit,
     ) {
         AccountsScreenContent(
