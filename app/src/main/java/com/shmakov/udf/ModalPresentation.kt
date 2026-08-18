@@ -1,6 +1,7 @@
 package com.shmakov.udf
 
 import com.shmakov.udf.navigation.EntryId
+import com.shmakov.udf.navigation.ModalEntrance
 import com.shmakov.udf.navigation.ModalLayer
 import java.util.Collections
 
@@ -16,6 +17,7 @@ internal sealed class PresentedModalLayer {
 
     data class Desired(
         override val layer: ModalLayer,
+        val entrance: ModalEntrance,
     ) : PresentedModalLayer()
 
     data class Exiting(
@@ -131,7 +133,9 @@ internal object ModalPresentationPlanner {
         desired.requireUniqueModalEntryIds()
         return ModalPresentationState.create(
             acceptedNavigationRevision = navigationRevision,
-            layers = desired.map(PresentedModalLayer::Desired),
+            layers = desired.map { layer ->
+                PresentedModalLayer.Desired(layer, ModalEntrance.Snap)
+            },
             lastIssuedExitGeneration = 0L,
         )
     }
@@ -180,6 +184,9 @@ internal object ModalPresentationPlanner {
         }
 
         val desiredById = desired.associateBy { layer -> layer.entry.id }
+        val previousDesiredById = previous.layers
+            .filterIsInstance<PresentedModalLayer.Desired>()
+            .associateBy { presentation -> presentation.layer.entry.id }
         var lastIssuedGeneration = previous.lastIssuedExitGeneration
         val exitingById = LinkedHashMap<EntryId, PresentedModalLayer.Exiting>()
 
@@ -204,9 +211,16 @@ internal object ModalPresentationPlanner {
             }
         }
 
+        val desiredPresentations = desired.map { layer ->
+            val previousPresentation = previousDesiredById[layer.entry.id]
+            PresentedModalLayer.Desired(
+                layer = layer,
+                entrance = previousPresentation?.entrance ?: ModalEntrance.Animate,
+            )
+        }
         val layers = mergeDesiredAndExiting(
             previousOrder = previous.layers.map { presentation -> presentation.layer.entry.id },
-            desired = desired,
+            desired = desiredPresentations,
             exitingById = exitingById,
         )
         val state = ModalPresentationState.create(
@@ -262,7 +276,8 @@ internal object ModalPresentationPlanner {
         val refreshedLayers = previous.layers.map { presentation ->
             when (presentation) {
                 is PresentedModalLayer.Desired -> PresentedModalLayer.Desired(
-                    desiredById.getValue(presentation.layer.entry.id),
+                    layer = desiredById.getValue(presentation.layer.entry.id),
+                    entrance = presentation.entrance,
                 )
 
                 is PresentedModalLayer.Exiting -> presentation
@@ -286,7 +301,9 @@ internal object ModalPresentationPlanner {
         desired: List<ModalLayer>,
     ): ModalPresentationState = ModalPresentationState.create(
         acceptedNavigationRevision = navigationRevision,
-        layers = desired.map(PresentedModalLayer::Desired),
+        layers = desired.map { layer ->
+            PresentedModalLayer.Desired(layer, ModalEntrance.Snap)
+        },
         lastIssuedExitGeneration = lastIssuedExitGeneration,
     )
 
@@ -307,14 +324,16 @@ private fun survivingOrderChanged(
 
 private fun mergeDesiredAndExiting(
     previousOrder: List<EntryId>,
-    desired: List<ModalLayer>,
+    desired: List<PresentedModalLayer.Desired>,
     exitingById: Map<EntryId, PresentedModalLayer.Exiting>,
 ): List<PresentedModalLayer> {
     if (exitingById.isEmpty()) {
-        return desired.map(PresentedModalLayer::Desired)
+        return desired
     }
 
-    val desiredIds = desired.mapTo(LinkedHashSet()) { layer -> layer.entry.id }
+    val desiredIds = desired.mapTo(LinkedHashSet()) { presentation ->
+        presentation.layer.entry.id
+    }
     val exitsBeforeAnchor = LinkedHashMap<EntryId, MutableList<PresentedModalLayer.Exiting>>()
     val trailingExits = mutableListOf<PresentedModalLayer.Exiting>()
 
@@ -331,10 +350,10 @@ private fun mergeDesiredAndExiting(
     }
 
     return buildList {
-        desired.forEach { layer ->
-            val entryId = layer.entry.id
+        desired.forEach { presentation ->
+            val entryId = presentation.layer.entry.id
             addAll(exitsBeforeAnchor[entryId].orEmpty())
-            add(PresentedModalLayer.Desired(layer))
+            add(presentation)
         }
         addAll(trailingExits)
     }

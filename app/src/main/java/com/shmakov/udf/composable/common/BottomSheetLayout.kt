@@ -17,7 +17,9 @@ import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -32,13 +34,23 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
+import com.shmakov.udf.navigation.ModalEntrance
 import com.shmakov.udf.navigation.ModalScreenState
 import kotlinx.coroutines.flow.first
 
+/**
+ * Renders a state-authoritative standard bottom sheet for one modal presentation.
+ *
+ * [entrance] is process-local presentation metadata. Recomposition with an already accepted
+ * [ModalEntrance.Animate] does not restart entrance motion. Switching this composition instance
+ * to `Shown + Snap` replaces any unfinished Material entrance/exit and presents the sheet in exact
+ * `Expanded` immediately; [onExitFinished] remains reserved for a completed Hidden phase.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BottomSheetLayout(
     targetState: ModalScreenState,
+    entrance: ModalEntrance,
     onDismissRequest: () -> Unit,
     onExitFinished: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
@@ -51,17 +63,46 @@ fun BottomSheetLayout(
     }
     val currentPhase by rememberUpdatedState(phase)
 
+    val presentationIdentity = BottomSheetPresentationIdentity(targetState, entrance)
+    val sheetStateReset = remember {
+        BottomSheetStateReset(
+            committedPresentation = presentationIdentity,
+            committedGeneration = 0L,
+        )
+    }
+    val resetForCommittedSnap =
+        presentationIdentity.isShownSnap && !sheetStateReset.committedPresentation.isShownSnap
+    val candidateSheetStateGeneration = if (resetForCommittedSnap) {
+        sheetStateReset.committedGeneration + 1L
+    } else {
+        sheetStateReset.committedGeneration
+    }
+    SideEffect {
+        sheetStateReset.committedPresentation = presentationIdentity
+        sheetStateReset.committedGeneration = candidateSheetStateGeneration
+    }
+
     // BottomSheetScaffold is a standard (collapsed/expanded) sheet. Pairing it with a modal
     // Hidden/Expanded SheetState breaks its anchor-change and accessibility semantics.
-    val bottomSheetState = rememberStandardBottomSheetState(
-        initialValue = SheetValue.PartiallyExpanded,
-        confirmValueChange = { true },
-        skipHiddenState = true,
-    )
+    // A candidate key forgets interrupted Material motion in the same composition that enters
+    // Shown+Snap. Committing it only in SideEffect makes an abandoned composition rollback-safe.
+    // Hidden keeps the committed key, so its exit animation continues on the existing SheetState.
+    val bottomSheetState = key(candidateSheetStateGeneration) {
+        rememberStandardBottomSheetState(
+            initialValue = if (presentationIdentity.isShownSnap) {
+                SheetValue.Expanded
+            } else {
+                SheetValue.PartiallyExpanded
+            },
+            confirmValueChange = { true },
+            skipHiddenState = true,
+        )
+    }
 
     val scaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = bottomSheetState,
     )
+    var snapBootstrapFinished by remember(bottomSheetState) { mutableStateOf(false) }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var sheetContentSize by remember { mutableStateOf(IntSize.Zero) }
 
@@ -101,7 +142,7 @@ fun BottomSheetLayout(
             )
         }
 
-        LaunchedEffect(phase, bottomSheetState, containerSize, sheetContentSize) {
+        LaunchedEffect(phase, entrance, bottomSheetState, containerSize, sheetContentSize) {
             suspend fun converge(target: BottomSheetMotionTarget) {
                 convergeBottomSheet(
                     target = target,
@@ -126,8 +167,14 @@ fun BottomSheetLayout(
                     // The pinned Material version can retain an old Expanded offset after sheet
                     // geometry changes while keeping the semantic value Expanded. Moving through
                     // the collapsed anchor makes the next expansion resolve the new exact offset;
-                    // gesture observation is deliberately not armed during this recovery.
-                    converge(BottomSheetMotionTarget.Collapsed)
+                    // gesture observation is deliberately not armed during this recovery. A Snap
+                    // bootstrap is already physically Expanded and must not replay that motion;
+                    // later geometry restarts still use the recovery round trip.
+                    val isInitialSnapBootstrap =
+                        entrance == ModalEntrance.Snap && !snapBootstrapFinished
+                    if (!isInitialSnapBootstrap) {
+                        converge(BottomSheetMotionTarget.Collapsed)
+                    }
 
                     while (currentPhase === effectPhase) {
                         // A zero-height sheet or a resize can temporarily remove Expanded. Such
@@ -140,6 +187,9 @@ fun BottomSheetLayout(
                         }
                         converge(BottomSheetMotionTarget.Expanded)
                         if (currentPhase !== effectPhase) return@LaunchedEffect
+                        if (isInitialSnapBootstrap) {
+                            snapBootstrapFinished = true
+                        }
 
                         val observation = snapshotFlow {
                             BottomSheetObservation(
@@ -171,6 +221,19 @@ fun BottomSheetLayout(
         }
     }
 }
+
+private data class BottomSheetPresentationIdentity(
+    val targetState: ModalScreenState,
+    val entrance: ModalEntrance,
+) {
+    val isShownSnap: Boolean
+        get() = targetState == ModalScreenState.Shown && entrance == ModalEntrance.Snap
+}
+
+private class BottomSheetStateReset(
+    var committedPresentation: BottomSheetPresentationIdentity,
+    var committedGeneration: Long,
+)
 
 private data class BottomSheetObservation(
     val hasExpandedAnchor: Boolean,

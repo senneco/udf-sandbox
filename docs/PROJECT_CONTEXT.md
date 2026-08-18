@@ -26,7 +26,7 @@
 - начальная demo-история: `Home -> Accounts -> Account(1)`;
 - navigation model, snapshot, reducer, store, projection и renderer presentation покрыты contract tests.
 
-Проект остаётся sandbox, а не production-приложением. State/reducer/projection/renderer boundaries уже разделены; lifecycle restoration пока не завершён, а Material bottom-sheet boundary уже имеет отдельный deterministic race safety net.
+Проект остаётся sandbox, а не production-приложением. State/reducer/projection/renderer boundaries разделены; `SavedStateHandle` restoration покрыт Activity recreation, настоящим `Bundle`/`Parcel` transport и simulated fresh-owner restoration, но реальный Android OS process kill пока не является частью device gate. Material bottom-sheet boundary имеет отдельный deterministic race safety net.
 
 ## Текущая модель
 
@@ -36,7 +36,7 @@
 
 Navigation input представлен закрытым набором typed `NavAction`, а `NavReducer.reduce(state, action)` является чистой Kotlin-функцией. Результат — `NavReduction.Changed(state, transition)` либо `NavReduction.Unchanged(state, reason)`. Action factories материализуют identity новых entries до reduction, поэтому reducer не генерирует случайные значения.
 
-`NavTransitionIntent` описывает только что совершившийся Push, Pop, branch replacement, modal dismiss или full-history replacement. Он возвращается отдельно от durable `NavState` и не попадает в snapshot. Demo-specific `AppStore` атомарно связывает immutable `AppState`, монотонную process-local `navigationRevision` и последний intent в `AppStateFrame`; `AppViewModel` удерживает store в lifecycle конкретной Activity. Revision увеличивается только при `Changed`. Renderer использует её вместе с exact intent validation, чтобы не переигрывать sticky metadata после renderer/composition recreation, layout reprojection или пропуска промежуточного frame. Process-death restoration navigation history при этом ещё не реализован.
+`NavTransitionIntent` описывает только что совершившийся Push, Pop, branch replacement, modal dismiss или full-history replacement. Он возвращается отдельно от durable `NavState` и не попадает в snapshot. Demo-specific `AppStore` атомарно связывает immutable `AppState`, монотонную process-local `navigationRevision` и последний intent в `AppStateFrame`; `AppViewModel` удерживает store в lifecycle конкретной Activity. Revision увеличивается только при `Changed`. Renderer использует её вместе с exact intent validation, чтобы не переигрывать sticky metadata после renderer/composition recreation, layout reprojection или пропуска промежуточного frame. Navigation history сохраняется через one-key `SavedStateHandle` envelope и восстанавливается в новом owner до создания store, а revision и intent всегда начинают заново с `0`/`null`.
 
 `NavProjector.project(navState, policy)` чисто преобразует валидную history в `NavigationRenderTree`: один root `ContentSlot`, упорядоченные nested slots и modal layers с exact `ownerContentEntryId`. Root размещается автоматически; application-owned `NavigationLayoutPolicy` вызывается только для последующих content entries и получает непустой immutable content path.
 
@@ -107,9 +107,11 @@ Route отвечает на вопрос «куда», entry — «какое и
 - entry ID подходит как единая identity для root и nested Compose content;
 - route catalog можно целиком разрешить до вызова destination composables с typed unsupported/failure result;
 - удалённый modal entry иногда нужно временно удерживать в presentation state до завершения exit-анимации;
-- bottom-sheet request, durable dismiss, physical convergence и exit completion можно разделить без передачи Material state во владение reducer-у.
+- bottom-sheet request, durable dismiss, physical convergence и exit completion можно разделить без передачи Material state во владение reducer-у;
+- validated navigation snapshot можно хранить в `SavedStateHandle` как одно Bundle-safe primitive значение и восстанавливать с теми же entry IDs;
+- transient revision, transition intent и presentation progress можно сбрасывать при новом owner-е, не переигрывая старый navigation transition.
 
-Reducer contract покрывает эталонные state transitions и подключён к lifecycle-aware owner. Store contracts доказывают атомарные frames, revisions, stale callbacks, независимых owners и сериализацию concurrent actions. Projection contracts отдельно доказывают single-/expanded размещение, modal ownership, content после modal, Back reprojection, immutable collections, typed policy failures и Java API. Presentation contracts доказывают exact Push/Pop/Replace matching, suppression stale/layout/renderer-recreation motion, entry-ID identity, независимость outgoing/target trees и exhaustive destination binding. Bottom-sheet contracts отдельно покрывают phase identity, internal cancellation retry, geometry/anchor churn, repeated dismiss sources и exact modal Back; process restoration остаётся незавершённым.
+Reducer contract покрывает эталонные state transitions и подключён к lifecycle-aware owner. Store и persistence contracts доказывают атомарные frames, revisions, stale callbacks, независимых owners, сериализацию concurrent actions, primitive envelope, fallback/rewrite и simulated process restoration через новый `SavedStateHandle`. Projection contracts отдельно доказывают single-/expanded размещение, modal ownership, content после modal, Back reprojection, immutable collections, typed policy failures и Java API. Presentation contracts доказывают exact Push/Pop/Replace matching, suppression stale/layout/renderer-recreation motion, entry-ID identity, независимость outgoing/target trees и exhaustive destination binding. Bottom-sheet contracts отдельно покрывают phase identity, internal cancellation retry, geometry/anchor churn, repeated dismiss sources и exact modal Back. Android instrumentation boundary поверх тех же contracts проверяет реальный `Bundle`/`Parcel` round trip, fresh owner, Activity recreation и отсутствие восстановления renderer-retained modal state.
 
 ## Текущий data flow
 
@@ -128,6 +130,7 @@ NavState + NavAction
 UI / renderer callback -> AppViewModel.dispatch(NavAction)
                        -> linearizable AppStore
                        -> NavReducer
+                       -> SavedNavigationStateStore.save(changed NavState)
                        -> AppStateFrame(AppState, revision, NavTransitionIntent?)
                        -> lifecycle-aware Compose collection
                        -> NavProjector(current state, selected layout policy)
@@ -146,13 +149,15 @@ UI / renderer callback -> AppViewModel.dispatch(NavAction)
 - `AppViewModel` является lifecycle owner одного экземпляра Activity; configuration recreation сохраняет тот же store.
 - разные Activity/ViewModel instances имеют независимые stores и больше не разделяют process-global navigation state.
 - `AppStore` публикует state только через read-only `StateFlow`, а все изменения проходят через синхронный `dispatch` и reducer.
-- после process death всё ещё создаётся hard-coded начальная история: snapshot пока не подключён к `SavedStateHandle`.
+- `AppViewModel` до создания store читает navigation payload из `SavedStateHandle`; валидная history восстанавливается с точными IDs, а missing/rejected payload целиком заменяется fallback-history и немедленно переписывается canonical значением.
+- новый owner всегда начинает с revision `0` и `null` transition intent, независимо от fresh или restored history.
 
 ### Модель и идентичность
 
 - `NavState` уже отделяет semantic route от entry identity и отклоняет empty stack, non-content root, неоднозначный route kind, blank или duplicate IDs.
 - ID создаётся action factory на application boundary и сохраняется как строка; `NavReducer` не генерирует случайность внутри reduction.
-- primitive snapshot и codec существуют, но ещё не подключены к `SavedStateHandle` и process-death lifecycle.
+- transport-agnostic snapshot кодируется в один `ArrayList<String>` под одним `SavedStateHandle` key: envelope хранит собственную версию, версию snapshot, counts, entry ID, route type и отсортированные string arguments.
+- restore всегда повторно проходит `DemoRouteCodec` и обычную validation `NavState.restore`; malformed/obsolete envelope, неизвестный route или невалидная history дают typed rejection, очистку stale payload и полную canonical fallback без частичного state.
 - `NavTransitionIntent` вынесен из durable state и snapshot; demo planner валидирует exact contiguous change, но application-defined animation policy ещё не выделена.
 - `ReplaceHistory` разрешает пересечение old/target IDs только для тех же routes; для новых deeplink- и logout-occurrences следует создавать свежие IDs.
 
@@ -170,6 +175,7 @@ UI / renderer callback -> AppViewModel.dispatch(NavAction)
 ### Modal lifecycle
 
 - retained presentation является immutable pure state и принадлежит конкретной root-ветке Compose, а не store, ViewModel, `NavState` или snapshot;
+- initial/restored modal layer и любой safe snap получают `ModalEntrance.Snap`; только новый desired layer в exact contiguous revision получает `Animate`, поэтому reconstruction не переигрывает entrance;
 - пакетно удалённые layers получают независимые generation tokens и освобождаются только собственными completion callbacks; stale/duplicate/ABA completion является no-op;
 - `onDismissRequest` сразу отправляет exact-ID reducer action, а `onExitFinished` изменяет только presentation state;
 - candidate state не записывается во время composition: commit выполняется в `SideEffect`, а удалённый destination использует уже принятый binding;
@@ -188,7 +194,7 @@ UI / renderer callback -> AppViewModel.dispatch(NavAction)
 
 ### Надёжность и поддержка
 
-- model, identity, snapshot, reducer, store serialization, projection, content/modal presentation planners, destination binding и bottom-sheet convergence покрыты contract tests, но lifecycle-restoration tests ещё отсутствуют;
+- model, identity, snapshot, persistence envelope, reducer, store serialization, simulated owner restoration, projection, content/modal presentation planners, destination binding и bottom-sheet convergence покрыты contract tests; Android `Bundle`/`Parcel`, Activity recreation и simulated process restoration в fresh owner проверяются на отдельной instrumentation-границе;
 - Android/Compose toolchain отражает исходный прототип и должен обновляться только после появления safety net;
 - demo UI смешивает Material 2 и Material 3.
 
@@ -238,7 +244,7 @@ object NavProjector {
 }
 ```
 
-Route, entry identity, validated `NavState`, primitive snapshot, pure reducer, lifecycle-aware state owner, чистая projection и branch-owned Compose rendering уже реализуют deterministic boundary этой схемы. `AppStateFrame` согласованно передаёт state, revision и transition intent renderer-у; retained-modal lifecycle отделён от durable state, а Material request/convergence/completion handshake является state-authoritative и cancellation-safe. Process restoration и настраиваемая animation policy ещё не реализованы.
+Route, entry identity, validated `NavState`, primitive snapshot, `SavedStateHandle` restoration, pure reducer, lifecycle-aware state owner, чистая projection и branch-owned Compose rendering уже реализуют deterministic boundary этой схемы. `AppStateFrame` согласованно передаёт state, revision и transition intent renderer-у; новый owner сбрасывает их к `0`/`null`, retained-modal lifecycle отделён от durable state, а Material request/convergence/completion handshake является state-authoritative и cancellation-safe. Настраиваемая application animation policy ещё не реализована.
 
 ## Обязательные инварианты
 
@@ -275,7 +281,6 @@ Route, entry identity, validated `NavState`, primitive snapshot, pure reducer, l
 Это темы для отдельных issues и экспериментов, а не уже принятые решения:
 
 - Должна ли каноническая навигация остаться линейной историей или стать явным деревом?
-- Как восстанавливать branch-local modal presentation после process recreation, не сохраняя временный animation progress?
 - Как превратить внутреннее exact-intent matching в простой application-defined animation policy API?
 - Как normalise deep link в валидную navigation history?
 - Как привязать saveable UI state к entry при перемещении projection между слотами?
@@ -334,4 +339,4 @@ Route, entry identity, validated `NavState`, primitive snapshot, pure reducer, l
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-JVM contract suite запускается этой командой. Воспроизводимый scoped device gate и landscape-кадры renderer regression #13 описаны в [`docs/evidence/issue-13/README.md`](evidence/issue-13/README.md). Retained-modal и owner-placement gate #14 описан в [`docs/evidence/issue-14/README.md`](evidence/issue-14/README.md). Cancellation-safe Material convergence, exact modal Back, full instrumentation result и реальные Back/swipe кадры находятся в [`docs/evidence/issue-15/README.md`](evidence/issue-15/README.md).
+JVM contract suite запускается этой командой. Воспроизводимый scoped device gate и landscape-кадры renderer regression #13 описаны в [`docs/evidence/issue-13/README.md`](evidence/issue-13/README.md). Retained-modal и owner-placement gate #14 описан в [`docs/evidence/issue-14/README.md`](evidence/issue-14/README.md). Cancellation-safe Material convergence, exact modal Back, full instrumentation result и реальные Back/swipe кадры находятся в [`docs/evidence/issue-15/README.md`](evidence/issue-15/README.md). Recreation, primitive `Bundle`/`Parcel` restoration и modal bootstrap без replay находятся в [`docs/evidence/issue-16/README.md`](evidence/issue-16/README.md).

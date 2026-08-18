@@ -3,6 +3,7 @@ package com.shmakov.udf
 import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.BackStackEntry
 import com.shmakov.udf.navigation.EntryId
+import com.shmakov.udf.navigation.ModalEntrance
 import com.shmakov.udf.navigation.ModalLayer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -26,8 +27,8 @@ class ModalPresentationPlannerContractTest {
         assertEquals(7, state.acceptedNavigationRevision)
         assertEquals(
             listOf(
-                PresentedModalLayer.Desired(layer("a")),
-                PresentedModalLayer.Desired(layer("b")),
+                presented(layer("a"), ModalEntrance.Snap),
+                presented(layer("b"), ModalEntrance.Snap),
             ),
             state.layers,
         )
@@ -35,6 +36,53 @@ class ModalPresentationPlannerContractTest {
             @Suppress("UNCHECKED_CAST")
             (state.layers as MutableList<PresentedModalLayer>).clear()
         }
+    }
+
+    @Test
+    fun `exact contiguous addition animates only new modal and preserves survivor entrance`() {
+        val a = layer("a")
+        val b = layer(id = "b", ownerId = "owner-before")
+        val c = layer("c")
+        val initial = ModalPresentationPlanner.start(1, listOf(a))
+
+        val added = readyState(
+            ModalPresentationPlanner.reconcile(initial, 2, listOf(a, b)),
+        )
+
+        assertEquals(
+            listOf(
+                presented(a, ModalEntrance.Snap),
+                presented(b, ModalEntrance.Animate),
+            ),
+            added.layers,
+        )
+
+        val addedAgain = readyState(
+            ModalPresentationPlanner.reconcile(added, 3, listOf(a, b, c)),
+        )
+
+        assertEquals(
+            listOf(
+                presented(a, ModalEntrance.Snap),
+                presented(b, ModalEntrance.Animate),
+                presented(c, ModalEntrance.Animate),
+            ),
+            addedAgain.layers,
+        )
+
+        val refreshedB = layer(id = "b", ownerId = "owner-after")
+        val refreshed = readyState(
+            ModalPresentationPlanner.reconcile(addedAgain, 3, listOf(a, refreshedB, c)),
+        )
+
+        assertEquals(
+            listOf(
+                presented(a, ModalEntrance.Snap),
+                presented(refreshedB, ModalEntrance.Animate),
+                presented(c, ModalEntrance.Animate),
+            ),
+            refreshed.layers,
+        )
     }
 
     @Test
@@ -72,9 +120,9 @@ class ModalPresentationPlannerContractTest {
 
         assertEquals(
             listOf(
-                PresentedModalLayer.Desired(a),
-                PresentedModalLayer.Desired(b),
-                PresentedModalLayer.Desired(c),
+                presented(a, ModalEntrance.Snap),
+                presented(b, ModalEntrance.Animate),
+                presented(c, ModalEntrance.Animate),
             ),
             state.layers,
         )
@@ -94,7 +142,7 @@ class ModalPresentationPlannerContractTest {
 
         assertEquals(
             listOf(
-                PresentedModalLayer.Desired(a),
+                presented(a, ModalEntrance.Snap),
                 PresentedModalLayer.Exiting(b, ModalExitToken(b.entry.id, 1)),
                 PresentedModalLayer.Exiting(c, ModalExitToken(c.entry.id, 2)),
             ),
@@ -115,9 +163,9 @@ class ModalPresentationPlannerContractTest {
 
         assertEquals(
             listOf(
-                PresentedModalLayer.Desired(a),
+                presented(a, ModalEntrance.Snap),
                 PresentedModalLayer.Exiting(b, ModalExitToken(b.entry.id, 1)),
-                PresentedModalLayer.Desired(c),
+                presented(c, ModalEntrance.Snap),
             ),
             state.layers,
         )
@@ -137,8 +185,8 @@ class ModalPresentationPlannerContractTest {
 
         assertEquals(
             listOf(
-                PresentedModalLayer.Desired(c),
-                PresentedModalLayer.Desired(d),
+                presented(c, ModalEntrance.Animate),
+                presented(d, ModalEntrance.Animate),
                 PresentedModalLayer.Exiting(a, ModalExitToken(a.entry.id, 1)),
                 PresentedModalLayer.Exiting(b, ModalExitToken(b.entry.id, 2)),
             ),
@@ -173,8 +221,8 @@ class ModalPresentationPlannerContractTest {
 
         assertEquals(
             listOf(
-                PresentedModalLayer.Desired(a),
-                PresentedModalLayer.Desired(c),
+                presented(a, ModalEntrance.Snap),
+                presented(c, ModalEntrance.Animate),
                 firstExit,
             ),
             withInsertedDesired.layers,
@@ -210,8 +258,8 @@ class ModalPresentationPlannerContractTest {
         assertEquals(39, state.acceptedNavigationRevision)
         assertEquals(
             listOf(
-                PresentedModalLayer.Desired(c),
-                PresentedModalLayer.Desired(d),
+                presented(c, ModalEntrance.Snap),
+                presented(d, ModalEntrance.Snap),
             ),
             state.layers,
         )
@@ -238,7 +286,7 @@ class ModalPresentationPlannerContractTest {
         assertEquals(cToken, afterC.token)
         assertEquals(
             listOf(
-                PresentedModalLayer.Desired(a),
+                presented(a, ModalEntrance.Snap),
                 PresentedModalLayer.Exiting(b, bToken),
             ),
             afterC.state.layers,
@@ -251,7 +299,7 @@ class ModalPresentationPlannerContractTest {
 
         val afterB = ModalPresentationPlanner.completeExit(duplicateC.state, bToken)
         assertTrue(afterB is ModalExitCompletion.Applied)
-        assertEquals(listOf(PresentedModalLayer.Desired(a)), afterB.state.layers)
+        assertEquals(listOf(presented(a, ModalEntrance.Snap)), afterB.state.layers)
     }
 
     @Test
@@ -268,7 +316,7 @@ class ModalPresentationPlannerContractTest {
         assertEquals(
             listOf(
                 firstExit,
-                PresentedModalLayer.Desired(second),
+                presented(second, ModalEntrance.Snap),
             ),
             retained.layers,
         )
@@ -276,7 +324,7 @@ class ModalPresentationPlannerContractTest {
         val completion = ModalPresentationPlanner.completeExit(retained, firstExit.token)
         assertTrue(completion is ModalExitCompletion.Applied)
         assertEquals(
-            listOf(PresentedModalLayer.Desired(second)),
+            listOf(presented(second, ModalEntrance.Snap)),
             completion.state.layers,
         )
     }
@@ -295,7 +343,7 @@ class ModalPresentationPlannerContractTest {
             ModalPresentationPlanner.reconcile(firstExitState, 62, listOf(refreshedLayer)),
         )
         assertEquals(
-            listOf(PresentedModalLayer.Desired(refreshedLayer)),
+            listOf(presented(refreshedLayer, ModalEntrance.Animate)),
             readded.layers,
         )
 
@@ -349,9 +397,9 @@ class ModalPresentationPlannerContractTest {
         )
         assertEquals(
             listOf(
-                PresentedModalLayer.Desired(a),
-                PresentedModalLayer.Desired(c),
-                PresentedModalLayer.Desired(b),
+                presented(a, ModalEntrance.Snap),
+                presented(c, ModalEntrance.Snap),
+                presented(b, ModalEntrance.Snap),
             ),
             fallback.state.layers,
         )
@@ -369,7 +417,7 @@ class ModalPresentationPlannerContractTest {
         )
 
         assertEquals(80, state.acceptedNavigationRevision)
-        assertEquals(listOf(PresentedModalLayer.Desired(after)), state.layers)
+        assertEquals(listOf(presented(after, ModalEntrance.Snap)), state.layers)
     }
 
     @Test
@@ -388,8 +436,8 @@ class ModalPresentationPlannerContractTest {
         )
         assertEquals(
             listOf(
-                PresentedModalLayer.Desired(a),
-                PresentedModalLayer.Desired(c),
+                presented(a, ModalEntrance.Snap),
+                presented(c, ModalEntrance.Snap),
             ),
             afterGap.layers,
         )
@@ -406,7 +454,7 @@ class ModalPresentationPlannerContractTest {
             ModalPresentationPlanner.reconcile(secondRetained, 92, listOf(b)),
         )
         assertEquals(92, afterRollback.acceptedNavigationRevision)
-        assertEquals(listOf(PresentedModalLayer.Desired(b)), afterRollback.layers)
+        assertEquals(listOf(presented(b, ModalEntrance.Snap)), afterRollback.layers)
         val staleAfterRollback = ModalPresentationPlanner.completeExit(
             afterRollback,
             secondToken,
@@ -455,6 +503,11 @@ class ModalPresentationPlannerContractTest {
     ): PresentedModalLayer.Exiting = state.layers
         .filterIsInstance<PresentedModalLayer.Exiting>()
         .single { it.layer.entry.id == entryId }
+
+    private fun presented(
+        layer: ModalLayer,
+        entrance: ModalEntrance,
+    ): PresentedModalLayer.Desired = PresentedModalLayer.Desired(layer, entrance)
 
     private fun layer(
         id: String,

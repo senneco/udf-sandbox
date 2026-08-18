@@ -21,6 +21,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.shmakov.udf.navigation.ModalEntrance
 import com.shmakov.udf.navigation.ModalScreenState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -36,6 +37,197 @@ class BottomSheetLayoutRegressionTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun initialShownSnapIsExactlyExpandedWithoutAdvancingTheAnimationClock() {
+        composeRule.mainClock.autoAdvance = false
+        var rootHeightPx = 0f
+        var sheetHeightPx = 0
+        var sheetTopPx = Float.POSITIVE_INFINITY
+        var dismissRequestCount = 0
+        var exitFinishedCount = 0
+
+        composeRule.setContent {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .onGloballyPositioned { coordinates ->
+                        rootHeightPx = coordinates.size.height.toFloat()
+                    },
+            ) {
+                BottomSheetLayout(
+                    targetState = ModalScreenState.Shown,
+                    entrance = ModalEntrance.Snap,
+                    onDismissRequest = { dismissRequestCount += 1 },
+                    onExitFinished = { exitFinishedCount += 1 },
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(160.dp)
+                            .testTag(SHEET_TAG)
+                            .onGloballyPositioned { coordinates ->
+                                sheetHeightPx = coordinates.size.height
+                                sheetTopPx = coordinates.positionInRoot().y
+                            },
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        assertTrue(
+            "Snap bootstrap was not exactly Expanded without clock advancement: " +
+                "root=$rootHeightPx, height=$sheetHeightPx, top=$sheetTopPx",
+            isExactlyExpanded(rootHeightPx, sheetHeightPx, sheetTopPx),
+        )
+        assertEquals(0, dismissRequestCount)
+        assertEquals(0, exitFinishedCount)
+    }
+
+    @Test
+    fun shownAnimateStartsCollapsedAndExpandsOnlyAsTheClockAdvances() {
+        composeRule.mainClock.autoAdvance = false
+        var rootHeightPx = 0f
+        var sheetHeightPx = 0
+        var sheetTopPx = Float.POSITIVE_INFINITY
+
+        composeRule.setContent {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .onGloballyPositioned { coordinates ->
+                        rootHeightPx = coordinates.size.height.toFloat()
+                    },
+            ) {
+                BottomSheetLayout(
+                    targetState = ModalScreenState.Shown,
+                    entrance = ModalEntrance.Animate,
+                    onDismissRequest = {},
+                    onExitFinished = {},
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(160.dp)
+                            .testTag(SHEET_TAG)
+                            .onGloballyPositioned { coordinates ->
+                                sheetHeightPx = coordinates.size.height
+                                sheetTopPx = coordinates.positionInRoot().y
+                            },
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithTag(SHEET_TAG, useUnmergedTree = true).assertExists()
+
+        assertTrue(rootHeightPx > 0f && sheetHeightPx > 0)
+        assertTrue(
+            "Animate entrance unexpectedly snapped directly to Expanded",
+            !isExactlyExpanded(rootHeightPx, sheetHeightPx, sheetTopPx),
+        )
+        assertTrue(
+            "Animate entrance never reached Expanded after clock advancement",
+            advanceFramesUntil {
+                isExactlyExpanded(rootHeightPx, sheetHeightPx, sheetTopPx)
+            },
+        )
+    }
+
+    @Test
+    fun shownSnapReentryInterruptsExitAndIsExactlyExpandedWithoutSettlingFrames() {
+        composeRule.mainClock.autoAdvance = false
+        val presentation = mutableStateOf(
+            BottomSheetTestPresentation(
+                targetState = ModalScreenState.Shown,
+                entrance = ModalEntrance.Animate,
+            ),
+        )
+        var rootHeightPx = 0f
+        var sheetHeightPx = 0
+        var sheetTopPx = Float.POSITIVE_INFINITY
+        var dismissRequestCount = 0
+        var exitFinishedCount = 0
+
+        composeRule.setContent {
+            val current = presentation.value
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .onGloballyPositioned { coordinates ->
+                        rootHeightPx = coordinates.size.height.toFloat()
+                    },
+            ) {
+                BottomSheetLayout(
+                    targetState = current.targetState,
+                    entrance = current.entrance,
+                    onDismissRequest = { dismissRequestCount += 1 },
+                    onExitFinished = { exitFinishedCount += 1 },
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(160.dp)
+                            .testTag(SHEET_TAG)
+                            .onGloballyPositioned { coordinates ->
+                                sheetHeightPx = coordinates.size.height
+                                sheetTopPx = coordinates.positionInRoot().y
+                            },
+                    )
+                }
+            }
+        }
+        assertTrue(
+            "Initial Animate presentation never reached exact Expanded geometry",
+            advanceFramesUntil {
+                isExactlyExpanded(rootHeightPx, sheetHeightPx, sheetTopPx)
+            },
+        )
+        composeRule.waitForIdle()
+        val acceptedExpandedTopPx = sheetTopPx
+
+        composeRule.runOnIdle {
+            presentation.value = BottomSheetTestPresentation(
+                targetState = ModalScreenState.Hidden,
+                entrance = ModalEntrance.Snap,
+            )
+        }
+        // One frame applies Exiting; two more begin its collapse without reaching completion.
+        repeat(3) {
+            composeRule.mainClock.advanceTimeByFrame()
+        }
+        composeRule.waitForIdle()
+
+        assertTrue(
+            "Hidden presentation did not begin its exit before re-entry",
+            hasDepartedFrom(
+                acceptedExpandedTopPx = acceptedExpandedTopPx,
+                sheetHeightPx = sheetHeightPx,
+                sheetTopPx = sheetTopPx,
+                rootHeightPx = rootHeightPx,
+            ),
+        )
+        assertEquals(0, dismissRequestCount)
+        assertEquals(0, exitFinishedCount)
+
+        composeRule.runOnIdle {
+            presentation.value = BottomSheetTestPresentation(
+                targetState = ModalScreenState.Shown,
+                entrance = ModalEntrance.Snap,
+            )
+        }
+        // Apply the replacement composition only. Snap must not need animation/settling frames.
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertTrue(
+            "Shown+Snap re-entry was not exact Expanded after its application frame: " +
+                "root=$rootHeightPx, height=$sheetHeightPx, top=$sheetTopPx",
+            isExactlyExpanded(rootHeightPx, sheetHeightPx, sheetTopPx),
+        )
+        assertEquals(0, dismissRequestCount)
+        assertEquals(0, exitFinishedCount)
+    }
+
+    @Test
     fun initialHiddenSheetCompletesExactlyOnceWithoutDismissRequest() {
         val recomposition = mutableStateOf(0)
         var dismissRequestCount = 0
@@ -46,6 +238,7 @@ class BottomSheetLayoutRegressionTest {
             recomposition.value
             BottomSheetLayout(
                 targetState = ModalScreenState.Hidden,
+                entrance = ModalEntrance.Snap,
                 onDismissRequest = { dismissRequestCount += 1 },
                 onExitFinished = { exitFinishedCount += 1 },
                 content = {},
@@ -78,6 +271,7 @@ class BottomSheetLayoutRegressionTest {
             recomposition.value
             BottomSheetLayout(
                 targetState = targetState.value,
+                entrance = ModalEntrance.Animate,
                 onDismissRequest = { dismissRequestCount += 1 },
                 onExitFinished = { exitFinishedCount += 1 },
             ) {
@@ -121,6 +315,7 @@ class BottomSheetLayoutRegressionTest {
         composeRule.setContent {
             BottomSheetLayout(
                 targetState = targetState.value,
+                entrance = ModalEntrance.Animate,
                 onDismissRequest = { dismissRequestCount += 1 },
                 onExitFinished = { exitFinishedCount += 1 },
             ) {
@@ -168,6 +363,7 @@ class BottomSheetLayoutRegressionTest {
                 if (mounted.value) {
                     BottomSheetLayout(
                         targetState = targetState.value,
+                        entrance = ModalEntrance.Animate,
                         onDismissRequest = {
                             dismissRequestCount += 1
                             targetState.value = ModalScreenState.Hidden
@@ -231,6 +427,7 @@ class BottomSheetLayoutRegressionTest {
         composeRule.setContent {
             BottomSheetLayout(
                 targetState = targetState.value,
+                entrance = ModalEntrance.Animate,
                 onDismissRequest = { dismissRequestCount += 1 },
                 onExitFinished = { exitFinishedCount += 1 },
             ) {
@@ -286,6 +483,7 @@ class BottomSheetLayoutRegressionTest {
             Box(Modifier.fillMaxSize()) {
                 BottomSheetLayout(
                     targetState = targetState.value,
+                    entrance = ModalEntrance.Animate,
                     onDismissRequest = { dismissRequestCount += 1 },
                     onExitFinished = { exitFinishedCount += 1 },
                 ) {
@@ -365,6 +563,7 @@ class BottomSheetLayoutRegressionTest {
             ) {
                 BottomSheetLayout(
                     targetState = ModalScreenState.Shown,
+                    entrance = ModalEntrance.Animate,
                     onDismissRequest = { dismissRequestCount += 1 },
                     onExitFinished = { exitFinishedCount += 1 },
                 ) {
@@ -458,6 +657,7 @@ class BottomSheetLayoutRegressionTest {
             ) {
                 BottomSheetLayout(
                     targetState = ModalScreenState.Shown,
+                    entrance = ModalEntrance.Animate,
                     onDismissRequest = { dismissRequestCount += 1 },
                     onExitFinished = { exitFinishedCount += 1 },
                 ) {
@@ -541,6 +741,7 @@ class BottomSheetLayoutRegressionTest {
             ) {
                 BottomSheetLayout(
                     targetState = targetState.value,
+                    entrance = ModalEntrance.Animate,
                     onDismissRequest = { dismissRequestCount += 1 },
                     onExitFinished = { exitFinishedCount += 1 },
                 ) {
@@ -611,6 +812,7 @@ class BottomSheetLayoutRegressionTest {
             ) {
                 BottomSheetLayout(
                     targetState = targetState.value,
+                    entrance = ModalEntrance.Animate,
                     onDismissRequest = { dismissRequestCount += 1 },
                     onExitFinished = { exitFinishedCount += 1 },
                 ) {
@@ -758,4 +960,17 @@ class BottomSheetLayoutRegressionTest {
             contentTopPx >= 0f &&
             contentTopPx + contentHeightPx <= rootHeightPx + 1f
 
+    private fun isExactlyExpanded(
+        rootHeightPx: Float,
+        contentHeightPx: Int,
+        contentTopPx: Float,
+    ): Boolean =
+        isContentFullyVisible(rootHeightPx, contentHeightPx, contentTopPx) &&
+            abs(contentTopPx + contentHeightPx - rootHeightPx) < 1f
+
 }
+
+private data class BottomSheetTestPresentation(
+    val targetState: ModalScreenState,
+    val entrance: ModalEntrance,
+)

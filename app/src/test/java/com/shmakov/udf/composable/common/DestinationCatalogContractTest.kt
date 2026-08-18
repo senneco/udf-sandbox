@@ -12,6 +12,7 @@ import com.shmakov.udf.navigation.ContentPlacementDecision
 import com.shmakov.udf.navigation.ContentRoute
 import com.shmakov.udf.navigation.EntryId
 import com.shmakov.udf.navigation.Home
+import com.shmakov.udf.navigation.ModalEntrance
 import com.shmakov.udf.navigation.ModalLayer
 import com.shmakov.udf.navigation.ModalScreen
 import com.shmakov.udf.navigation.NavProjectionResult
@@ -189,8 +190,8 @@ class DestinationCatalogContractTest {
             layer = b,
             token = ModalExitToken(b.entry.id, generation = 2),
         )
-        val desiredC = PresentedModalLayer.Desired(c)
-        val desiredD = PresentedModalLayer.Desired(d)
+        val desiredC = PresentedModalLayer.Desired(c, ModalEntrance.Snap)
+        val desiredD = PresentedModalLayer.Desired(d, ModalEntrance.Snap)
 
         val result = DestinationTreeBinder.materializePresentedModalLayers(
             layers = listOf(desiredC, desiredD, aExit, bExit),
@@ -200,9 +201,18 @@ class DestinationCatalogContractTest {
                 BoundModalLayer(a, currentAScreen),
             ),
             acceptedLayers = listOf(
-                BoundPresentedModalLayer(PresentedModalLayer.Desired(a), previousAScreen),
-                BoundPresentedModalLayer(PresentedModalLayer.Desired(b), previousBScreen),
-                BoundPresentedModalLayer(PresentedModalLayer.Desired(c), previousCScreen),
+                BoundPresentedModalLayer(
+                    PresentedModalLayer.Desired(a, ModalEntrance.Snap),
+                    previousAScreen,
+                ),
+                BoundPresentedModalLayer(
+                    PresentedModalLayer.Desired(b, ModalEntrance.Snap),
+                    previousBScreen,
+                ),
+                BoundPresentedModalLayer(
+                    PresentedModalLayer.Desired(c, ModalEntrance.Snap),
+                    previousCScreen,
+                ),
             ),
         )
 
@@ -225,11 +235,13 @@ class DestinationCatalogContractTest {
                 DestinationTreeBindingProblem.MissingPresentationBinding(desired.entry),
             ),
             DestinationTreeBinder.materializePresentedModalLayers(
-                layers = listOf(PresentedModalLayer.Desired(desired)),
+                layers = listOf(
+                    PresentedModalLayer.Desired(desired, ModalEntrance.Snap),
+                ),
                 desiredLayers = emptyList(),
                 acceptedLayers = listOf(
                     BoundPresentedModalLayer(
-                        PresentedModalLayer.Desired(desired),
+                        PresentedModalLayer.Desired(desired, ModalEntrance.Snap),
                         acceptedScreen,
                     ),
                 ),
@@ -261,7 +273,7 @@ class DestinationCatalogContractTest {
     @Test
     fun `materialized presentation result is a defensive runtime unmodifiable copy`() {
         val desired = modalLayer("desired", accountId = 7)
-        val presentation = PresentedModalLayer.Desired(desired)
+        val presentation = PresentedModalLayer.Desired(desired, ModalEntrance.Snap)
         val sourcePresentations = arrayListOf<PresentedModalLayer>(presentation)
         val sourceDesired = arrayListOf(BoundModalLayer(desired, modalScreen(desired)))
 
