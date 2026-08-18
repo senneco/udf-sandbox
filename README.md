@@ -46,7 +46,7 @@ flowchart LR
     UI -->|"анимация завершена"| Action
 ```
 
-Navigation core уже содержит валидируемую entry model, сохраняемое primitive-представление истории, typed `NavAction` и чистый `NavReducer`. Reducer возвращает `NavReduction.Changed` с новым state и transient `NavTransitionIntent` либо `NavReduction.Unchanged` с причиной безопасного no-op. Demo UI отправляет actions через одну временную process-global dispatch boundary; lifecycle-aware store и чистая layout projection остаются следующими шагами.
+Navigation core уже содержит валидируемую entry model, сохраняемое primitive-представление истории, typed `NavAction` и чистый `NavReducer`. Activity-scoped `AppViewModel` владеет demo-specific `AppStore`, публикует immutable frames через read-only `StateFlow` и сериализует actions перед reducer. Compose наблюдает flow с учётом lifecycle и передаёт события наверх через явные callbacks. Следующий архитектурный шаг — чистая layout projection.
 
 ## Текущее состояние
 
@@ -59,12 +59,14 @@ Navigation core уже содержит валидируемую entry model, с
 - typed push, pop, branch replacement, exact-ID modal dismiss и полную замену history;
 - чистый reducer с явными `Changed`/`Unchanged` outcomes;
 - transient transition intent, который не попадает в `NavState` или snapshot;
+- lifecycle-aware ViewModel и linearizable store как единственную demo-boundary для durable state;
+- lifecycle-aware Compose collection и явные callbacks без глобальных state imports в UI;
 - content и modal destinations в одной логической истории;
 - вложенный рендеринг в landscape;
 - анимированные переходы между content;
 - синхронизацию закрытия bottom sheet обратно в navigation state.
 
-Известные ограничения: текущая dispatch boundary всё ещё принадлежит глобальному `Application`, неполная регистрация routes и modal bookkeeping остаются внутри renderer, snapshot не подключён к process-death restoration, а projection-, lifecycle- и UI-тесты ещё отсутствуют. Подробный baseline, ограничения и целевая архитектура описаны в [контексте проекта](docs/PROJECT_CONTEXT.md).
+Известные ограничения: store пока является внутренней demo-интеграцией, snapshot не подключён к process-death restoration, а неполная регистрация routes, layout projection и modal bookkeeping остаются внутри renderer. Projection- и lifecycle-restoration tests ещё отсутствуют. Подробный baseline, ограничения и целевая архитектура описаны в [контексте проекта](docs/PROJECT_CONTEXT.md).
 
 Базовая модель намеренно читается без framework-specific терминов:
 
@@ -143,9 +145,30 @@ when (val reduction = NavReducer.reduce(state, action)) {
 }
 ```
 
+## Lifecycle-aware host
+
+Demo host не является частью публичного navigation core. Он показывает минимальную Android-границу: `AppStore` атомарно публикует immutable `AppState` и transition metadata одним `AppStateFrame`, а `AppViewModel` удерживает store в lifecycle конкретной Activity.
+
+```kotlin
+private val appViewModel: AppViewModel by viewModels()
+
+setContent {
+    val frame by appViewModel.frames.collectAsStateWithLifecycle()
+
+    AnimatedNavigation(
+        navState = frame.appState.navState,
+        navTransition = frame.navigationTransition,
+        onNavigationAction = { action -> appViewModel.dispatch(action) },
+    )
+}
+```
+
+`dispatch` всегда применяет action к последнему committed state под одной короткой критической секцией. `Changed` публикует один согласованный frame, а `Unchanged` сохраняет тот же frame instance и не создаёт ложную анимацию. Transition — process-local metadata текущего frame, sticky до следующего `Changed`; он не является pending event и не восстанавливается из snapshot.
+
 ## Карта кода
 
-- [`AppState.kt`](app/src/main/java/com/shmakov/udf/AppState.kt) и [`UdfApp.kt`](app/src/main/java/com/shmakov/udf/UdfApp.kt) — текущий глобальный владелец state и начальное demo-состояние.
+- [`AppState.kt`](app/src/main/java/com/shmakov/udf/AppState.kt), [`AppStore.kt`](app/src/main/java/com/shmakov/udf/AppStore.kt) и [`AppViewModel.kt`](app/src/main/java/com/shmakov/udf/AppViewModel.kt) — immutable application state, linearizable store и Activity-scoped lifecycle owner.
+- [`UdfApp.kt`](app/src/main/java/com/shmakov/udf/UdfApp.kt) — только application initialization и logging; navigation state там не хранится.
 - [`navigation/`](app/src/main/java/com/shmakov/udf/navigation) — routes, back-stack entries, валидируемый navigation state, actions/reducer, snapshot/codec и screen abstractions.
 - [`AnimatedNavigation.kt`](app/src/main/java/com/shmakov/udf/composable/common/AnimatedNavigation.kt) — проекция стека, вложенный рендеринг, content transitions и modal bookkeeping.
 - [`BottomSheetLayout.kt`](app/src/main/java/com/shmakov/udf/composable/common/BottomSheetLayout.kt) — временное animation state bottom sheet.

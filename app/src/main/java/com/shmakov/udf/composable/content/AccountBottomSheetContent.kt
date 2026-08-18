@@ -6,41 +6,23 @@ import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment.Companion.CenterHorizontally
 import androidx.compose.ui.Modifier
-import com.shmakov.udf.UdfApp
-import com.shmakov.udf.navigation.Account
-import com.shmakov.udf.navigation.AccountDetails
-import com.shmakov.udf.navigation.BackStackEntry
-import com.shmakov.udf.navigation.NavAction
 
 @Composable
 fun ColumnScope.AccountBottomSheetContent(
-    currentEntry: BackStackEntry,
     accountId: Int,
+    onNextAccount: (Int) -> Unit,
+    onDetailsRequested: () -> Unit,
 ) {
     if (accountId < 9) {
         Button(
-            onClick = {
-                UdfApp.dispatchNavigation(
-                    NavAction.push(
-                        expectedTopId = currentEntry.id,
-                        route = Account(accountId = accountId + 1),
-                    ),
-                )
-            },
+            onClick = { onNextAccount(accountId + 1) },
         ) {
             Text(text = "Go to Account #${accountId + 1}")
         }
     }
 
     Button(
-        onClick = {
-            UdfApp.dispatchNavigation(
-                NavAction.push(
-                    expectedTopId = currentEntry.id,
-                    route = AccountDetails(accountId = accountId),
-                ),
-            )
-        },
+        onClick = onDetailsRequested,
         modifier = Modifier
             .align(CenterHorizontally)
     ) {

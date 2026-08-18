@@ -36,7 +36,7 @@
 
 Navigation input представлен закрытым набором typed `NavAction`, а `NavReducer.reduce(state, action)` является чистой Kotlin-функцией. Результат — `NavReduction.Changed(state, transition)` либо `NavReduction.Unchanged(state, reason)`. Action factories материализуют identity новых entries до reduction, поэтому reducer не генерирует случайные значения.
 
-`NavTransitionIntent` описывает только что совершившийся Push, Pop, branch replacement, modal dismiss или full-history replacement. Он возвращается отдельно от durable `NavState` и не попадает в snapshot. Временный `UdfApp` удерживает последний intent рядом с `AppState` в process-local render envelope до следующего `Changed`, а renderer использует его для выбора legacy motion. Одноразовое consumption, lifecycle-aware store и настраиваемая animation policy появятся отдельными инкрементами.
+`NavTransitionIntent` описывает только что совершившийся Push, Pop, branch replacement, modal dismiss или full-history replacement. Он возвращается отдельно от durable `NavState` и не попадает в snapshot. Demo-specific `AppStore` атомарно связывает immutable `AppState` и последний intent в process-local `AppStateFrame`; `AppViewModel` удерживает store в lifecycle конкретной Activity. Intent остаётся metadata текущего frame до следующего `Changed`, а renderer использует его для выбора legacy motion. Одноразовое consumption и настраиваемая animation policy появятся отдельными инкрементами.
 
 `AnimatedNavigation(navState, navTransition)` сворачивает entries и выбирает content для конкретного внутреннего render slot. `Screen.whereToShowChild` может вернуть другой слот, поэтому одна логическая история имеет разные физические layout-проекции.
 
@@ -54,6 +54,7 @@ Navigation input представлен закрытым набором typed `N
 - **Navigation state** — упорядоченная логическая история entries.
 - **Action** — событие пользователя, системы, lifecycle или завершения presentation-анимации, отправленное владельцу state.
 - **Reduction** — результат чистого применения `NavAction`: изменённый state с transient transition intent либо тот же state с typed причиной no-op.
+- **State frame** — атомарно опубликованная пара immutable `AppState` и process-local transition metadata; это observable runtime envelope, а не persistence format.
 - **Transition intent** — эфемерное описание совершившегося navigation transition; оно не является частью `NavState` и не восстанавливается из snapshot.
 - **Projection** — детерминированное преобразование navigation state и конфигурации окна в видимое размещение.
 - **Navigation tree** — root content, nested slots и modal layers, которые должен отрисовать Compose.
@@ -98,7 +99,7 @@ Route отвечает на вопрос «куда», entry — «какое и
 - branch replacement полезен, когда родитель остаётся видимым и выбирает другого ребёнка;
 - удалённый modal entry иногда нужно временно удерживать в presentation state до завершения exit-анимации.
 
-Reducer contract покрывает эталонные state transitions и подключён к одной временной runtime boundary, но lifecycle-aware store, чистая projection, renderer races, lifecycle restoration и сложные анимации ещё не доказаны end-to-end.
+Reducer contract покрывает эталонные state transitions и подключён к lifecycle-aware owner. Store contracts доказывают атомарные frames, stale callbacks, независимых owners и сериализацию concurrent actions, но чистая projection, renderer races, process restoration и сложные анимации ещё не доказаны end-to-end.
 
 ## Текущий data flow
 
@@ -111,25 +112,27 @@ NavState + NavAction
      | NavReduction.Unchanged(sameState, reason)
 ```
 
-В demo runtime все navigation mutations уже проходят через одну boundary:
+В demo runtime все navigation mutations проходят через один Activity-scoped owner:
 
 ```text
-UI callback -> UdfApp.dispatchNavigation(NavAction)
-            -> NavReducer
-            -> AppState + transient NavTransitionIntent
-            -> Compose rendering
+UI / renderer callback -> AppViewModel.dispatch(NavAction)
+                       -> linearizable AppStore
+                       -> NavReducer
+                       -> AppStateFrame(AppState, NavTransitionIntent?)
+                       -> lifecycle-aware Compose collection
+                       -> Compose rendering
 ```
 
-`appState` доступен UI только для чтения; `MainActivity`, demo composables и modal callback больше не собирают history вручную. Эта boundary всё ещё process-global и не lifecycle-aware; effect boundary, чистая projection и настраиваемая reducer-to-renderer animation policy пока отсутствуют.
+`MainActivity` получает read-only `StateFlow<AppStateFrame>` через `collectAsStateWithLifecycle`. Screen adapters создают typed actions, leaf composables получают semantic callbacks, а renderer только сообщает modal completion. `UdfApp` больше не хранит navigation state. Чистая projection, process restoration и настраиваемая reducer-to-renderer animation policy пока отсутствуют.
 
 ## Известные риски и незавершённая работа
 
 ### Владение state
 
-- `UdfApp` всё ещё владеет глобальным для процесса Compose frame, хотя `appState` снаружи доступен только для чтения.
-- UI и renderer отправляют typed actions в `dispatchNavigation`, но эта временная boundary не привязана к lifecycle конкретной Activity.
-- обычная Activity recreation может случайно сохранить state, но после process death восстанавливается hard-coded начальная история.
-- несколько Activity или task instances разделяли бы один navigation state.
+- `AppViewModel` является lifecycle owner одного экземпляра Activity; configuration recreation сохраняет тот же store.
+- разные Activity/ViewModel instances имеют независимые stores и больше не разделяют process-global navigation state.
+- `AppStore` публикует state только через read-only `StateFlow`, а все изменения проходят через синхронный `dispatch` и reducer.
+- после process death всё ещё создаётся hard-coded начальная история: snapshot пока не подключён к `SavedStateHandle`.
 
 ### Модель и идентичность
 
@@ -158,11 +161,11 @@ UI callback -> UdfApp.dispatchNavigation(NavAction)
 
 - `NavState` и `NavReducer` защищают root независимо от устаревшего состояния UI callback.
 - pure reducer детерминированно останавливает быстрые Pop на root и возвращает typed no-op для stale IDs.
-- demo callbacks dispatch-ят actions через одну process-global boundary; lifecycle и конкурентное владение будут формализованы единым store.
+- store сериализует быстрые и concurrent actions одной приватной критической секцией; stale callbacks всегда редуцируются относительно последнего committed frame.
 
 ### Надёжность и поддержка
 
-- model, identity, snapshot и reducer покрыты pure Kotlin contract tests, но projection-, lifecycle- и UI navigation tests ещё отсутствуют;
+- model, identity, snapshot, reducer и store serialization покрыты JVM contract tests, но projection- и lifecycle-restoration tests ещё отсутствуют;
 - Android/Compose toolchain отражает исходный прототип и должен обновляться только после появления safety net;
 - demo UI смешивает Material 2 и Material 3.
 
@@ -176,7 +179,7 @@ UI/System event
     -> state owner
     -> NavReducer.reduce(previous NavState, NavAction)
     -> NavReduction
-    -> new AppState + transient NavTransitionIntent
+    -> AppStateFrame(AppState, transient NavTransitionIntent?)
     -> project(NavState, WindowConfiguration)
     -> NavigationTree(root, nested slots, modals)
     -> Compose rendering
@@ -209,7 +212,7 @@ fun project(
 ): NavigationTree
 ```
 
-Route, entry identity, validated `NavState`, primitive snapshot и pure navigation reducer уже реализуют deterministic core этой схемы. Временная runtime boundary передаёт transition intent renderer-у; lifecycle-aware state owner, чистая projection и настраиваемая animation policy ещё не реализованы.
+Route, entry identity, validated `NavState`, primitive snapshot, pure reducer и lifecycle-aware state owner уже реализуют deterministic state boundary этой схемы. `AppStateFrame` согласованно передаёт state и transition intent renderer-у; чистая projection, process restoration и настраиваемая animation policy ещё не реализованы.
 
 ## Обязательные инварианты
 
@@ -279,6 +282,8 @@ Route, entry identity, validated `NavState`, primitive snapshot и pure navigati
 ## Важные файлы
 
 - `app/src/main/java/com/shmakov/udf/AppState.kt`
+- `app/src/main/java/com/shmakov/udf/AppStore.kt`
+- `app/src/main/java/com/shmakov/udf/AppViewModel.kt`
 - `app/src/main/java/com/shmakov/udf/UdfApp.kt`
 - `app/src/main/java/com/shmakov/udf/MainActivity.kt`
 - `app/src/main/java/com/shmakov/udf/navigation/Route.kt`

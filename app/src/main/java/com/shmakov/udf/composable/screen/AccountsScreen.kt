@@ -2,7 +2,9 @@ package com.shmakov.udf.composable.screen
 
 import androidx.compose.runtime.Composable
 import com.shmakov.udf.composable.content.AccountsScreenContent
+import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.BackStackEntry
+import com.shmakov.udf.navigation.NavAction
 import com.shmakov.udf.navigation.NavTransitionIntent
 import com.shmakov.udf.navigation.Screen
 
@@ -14,7 +16,17 @@ class AccountsScreen(
     override fun Content(
         nestedEntries: List<BackStackEntry>,
         navTransition: NavTransitionIntent?,
+        onNavigationAction: (NavAction) -> Unit,
     ) {
-        AccountsScreenContent(currentEntry = entry)
+        AccountsScreenContent(
+            onAccountSelected = { accountId ->
+                onNavigationAction(
+                    NavAction.push(
+                        expectedTopId = entry.id,
+                        route = Account(accountId = accountId),
+                    ),
+                )
+            },
+        )
     }
 }

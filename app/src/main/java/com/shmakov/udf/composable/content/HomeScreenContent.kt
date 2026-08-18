@@ -11,7 +11,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import com.shmakov.udf.UdfApp
 import com.shmakov.udf.composable.common.AnimatedNavigation
 import com.shmakov.udf.navigation.*
 
@@ -20,6 +19,8 @@ fun HomeScreenContent(
     currentEntry: BackStackEntry,
     nestedEntries: List<BackStackEntry>,
     navTransition: NavTransitionIntent?,
+    onDestinationSelected: (ContentRoute) -> Unit,
+    onNavigationAction: (NavAction) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -34,11 +35,11 @@ fun HomeScreenContent(
 
         if (isLandscape) {
             Row {
-                Buttons(currentEntry = currentEntry)
+                Buttons(onDestinationSelected = onDestinationSelected)
             }
         } else {
             Column {
-                Buttons(currentEntry = currentEntry)
+                Buttons(onDestinationSelected = onDestinationSelected)
             }
         }
 
@@ -47,6 +48,7 @@ fun HomeScreenContent(
                 entries = nestedEntries,
                 into = RenderSlot.Nested(currentEntry.id),
                 navTransition = navTransition,
+                onNavigationAction = onNavigationAction,
             )
         }
     }
@@ -54,31 +56,19 @@ fun HomeScreenContent(
 
 @Composable
 fun Buttons(
-    currentEntry: BackStackEntry,
+    onDestinationSelected: (ContentRoute) -> Unit,
 ) {
-    Button(onClick = { navigateTo(currentEntry, Accounts) }) {
+    Button(onClick = { onDestinationSelected(Accounts) }) {
         Text(text = "Go to Accounts")
     }
 
     Button(
-        onClick = { navigateTo(currentEntry, Transactions) },
+        onClick = { onDestinationSelected(Transactions) },
     ) {
         Text(text = "Go to Transactions")
     }
 
-    Button(onClick = { navigateTo(currentEntry, Cards) }) {
+    Button(onClick = { onDestinationSelected(Cards) }) {
         Text(text = "Go to Cards")
     }
-}
-
-private fun navigateTo(
-    currentEntry: BackStackEntry,
-    targetRoute: ContentRoute,
-) {
-    UdfApp.dispatchNavigation(
-        NavAction.navigateFrom(
-            sourceId = currentEntry.id,
-            route = targetRoute,
-        ),
-    )
 }
