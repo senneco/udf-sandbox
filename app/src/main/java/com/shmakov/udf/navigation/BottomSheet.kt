@@ -5,8 +5,8 @@ import androidx.compose.runtime.Composable
 import com.shmakov.udf.composable.common.BottomSheetLayout
 
 abstract class BottomSheet(
-    destination: Destination,
-) : ModalScreen(destination) {
+    entry: BackStackEntry,
+) : ModalScreen(entry) {
 
     @Composable
     override fun ModalContent(

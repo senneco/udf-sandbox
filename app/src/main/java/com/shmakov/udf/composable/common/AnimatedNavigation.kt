@@ -25,72 +25,92 @@ import com.shmakov.udf.composable.screen.TransactionsScreen
 import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.AccountDetails
 import com.shmakov.udf.navigation.Accounts
+import com.shmakov.udf.navigation.BackStackEntry
 import com.shmakov.udf.navigation.Cards
-import com.shmakov.udf.navigation.Destination
+import com.shmakov.udf.navigation.ContentRoute
 import com.shmakov.udf.navigation.Home
+import com.shmakov.udf.navigation.ModalRoute
 import com.shmakov.udf.navigation.ModalScreen
 import com.shmakov.udf.navigation.ModalScreenState
 import com.shmakov.udf.navigation.NavActionType
 import com.shmakov.udf.navigation.NavState
+import com.shmakov.udf.navigation.RenderSlot
 import com.shmakov.udf.navigation.Screen
 import com.shmakov.udf.navigation.Transactions
+import com.shmakov.udf.navigation.requireValid
 import java.util.concurrent.atomic.AtomicReference
 
 @Composable
-fun AnimatedNavigation(navState: NavState, into: Destination) {
-    val rootDestination = navState.backStack.firstOrNull() ?: return
+fun AnimatedNavigation(
+    navState: NavState,
+    lastNavActionType: NavActionType,
+) {
+    AnimatedNavigation(
+        entries = navState.entries,
+        into = RenderSlot.Root,
+        lastNavActionType = lastNavActionType,
+    )
+}
+
+@Composable
+internal fun AnimatedNavigation(
+    entries: List<BackStackEntry>,
+    into: RenderSlot,
+    lastNavActionType: NavActionType,
+) {
+    val rootEntry = entries.firstOrNull() ?: return
 
     lateinit var lastScreen: Screen
     var lastContentIndex = 0
-    var childDestination = into
+    var childSlot = into
 
-    val targetDestination = navState.backStack
-        .foldIndexed<Destination, Destination?>(null) { index, lastShownDestination, nextDestination ->
-            val result = if (lastShownDestination == null) {
-                nextDestination
-            } else if (nextDestination is Destination.Content) {
-                childDestination = lastScreen.whereToShowChild(
-                    whereShowCurrentDestination = childDestination,
-                    childDestination = nextDestination,
+    val targetEntry = entries
+        .foldIndexed<BackStackEntry, BackStackEntry?>(null) { index, lastShownEntry, nextEntry ->
+            val result = if (lastShownEntry == null) {
+                nextEntry
+            } else if (nextEntry.route is ContentRoute) {
+                childSlot = lastScreen.whereToShowChild(
+                    currentSlot = childSlot,
+                    childEntry = nextEntry,
                 )
-                if (childDestination == into) {
+                if (childSlot == into) {
                     lastContentIndex = index
 
-                    nextDestination
+                    nextEntry
                 } else {
-                    lastShownDestination
+                    lastShownEntry
                 }
             } else {
-                lastShownDestination
+                lastShownEntry
             }
 
             // TODO: make one interface for content and modal screens
-            lastScreen = if (nextDestination is Destination.Content) {
-                getContentScreen(nextDestination)
+            lastScreen = if (nextEntry.route is ContentRoute) {
+                getContentScreen(nextEntry)
             } else {
                 lastScreen
             }
 
             result
-        } ?: rootDestination
+        } ?: rootEntry
 
-    val finalEnter: AnimatedContentScope<Destination>.() -> EnterTransition = {
-        when (navState.lastNavActionType) {
+    val finalEnter: AnimatedContentScope<BackStackEntry>.() -> EnterTransition = {
+        when (lastNavActionType) {
             NavActionType.Push -> appPushEnterTransition
             NavActionType.Pop -> appPopEnterTransition
             NavActionType.Replace -> appReplaceEnterTransition
         }
     }
 
-    val finalExit: AnimatedContentScope<Destination>.() -> ExitTransition = {
-        when (navState.lastNavActionType) {
+    val finalExit: AnimatedContentScope<BackStackEntry>.() -> ExitTransition = {
+        when (lastNavActionType) {
             NavActionType.Push -> appPushExitTransition
             NavActionType.Pop -> appPopExitTransition
             NavActionType.Replace -> appReplaceExitTransition
         }
     }
 
-    val transition = updateTransition(targetState = targetDestination, label = "AnimatedContent")
+    val transition = updateTransition(targetState = targetEntry, label = "AnimatedContent")
 
     transition.AnimatedContent(
         modifier = Modifier.fillMaxSize(),
@@ -100,37 +120,37 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
                 finalExit(),
             )
         },
-        contentKey = { it }
-    ) { destination ->
-        val nestedNavState = navState.copy(
-            backStack = navState.backStack.drop(lastContentIndex + 1)
+        contentKey = { it.id }
+    ) { entry ->
+        val nestedEntries = entries.drop(lastContentIndex + 1)
+
+        getContentScreen(entry).Content(
+            nestedEntries = nestedEntries,
+            lastNavActionType = lastNavActionType,
         )
 
-        getContentScreen(destination).Content(nestedNavState)
-
-        val modalDestinations = navState.backStack
-            .dropWhile { it != destination }
+        val modalEntries = entries
+            .dropWhile { it.id != entry.id }
             .drop(1)
-            .takeWhile { it is Destination.Modal }
-            .filterIsInstance<Destination.Modal>()
+            .takeWhile { it.route is ModalRoute }
 
-        val rememberedModalDestinations =
-            remember { AtomicReference(emptyList<Destination.Modal>()) }
+        val rememberedModalEntries =
+            remember { AtomicReference(emptyList<BackStackEntry>()) }
 
-        val lastModalDestinations = rememberedModalDestinations.get()
+        val lastModalEntries = rememberedModalEntries.get()
 
-        val allDestinations = mutableListOf<Destination.Modal>()
+        val allEntries = mutableListOf<BackStackEntry>()
 
         var lastIndex = 0
 
-        var lastNewIndex = modalDestinations.size
+        var lastNewIndex = modalEntries.size
 
-        modalDestinations.forEachIndexed { index, modalDestination ->
-            val indexInLast = lastModalDestinations.indexOf(modalDestination)
+        modalEntries.forEachIndexed { index, modalEntry ->
+            val indexInLast = lastModalEntries.indexOfFirst { it.id == modalEntry.id }
 
             if (indexInLast != -1) {
-                allDestinations += lastModalDestinations.subList(lastIndex, indexInLast)
-                allDestinations += modalDestination
+                allEntries += lastModalEntries.subList(lastIndex, indexInLast)
+                allEntries += modalEntry
                 lastIndex = indexInLast + 1
             } else {
                 lastNewIndex = index
@@ -138,51 +158,49 @@ fun AnimatedNavigation(navState: NavState, into: Destination) {
             }
         }
 
-        allDestinations += lastModalDestinations.drop(lastIndex)
-        allDestinations += modalDestinations.drop(lastNewIndex)
+        allEntries += lastModalEntries.drop(lastIndex)
+        allEntries += modalEntries.drop(lastNewIndex)
 
-        allDestinations.forEach { item ->
-            key(item) {
+        allEntries.forEach { item ->
+            key(item.id) {
                 val screen = getModalScreen(item)
 
                 screen.ModalContent(
-                    targetState = if (item in modalDestinations) {
+                    targetState = if (modalEntries.any { it.id == item.id }) {
                         ModalScreenState.Shown
                     } else {
                         ModalScreenState.Hidden
                     },
                     onHide = {
-                        rememberedModalDestinations.getAndUpdate { items ->
-                            items - item
+                        rememberedModalEntries.getAndUpdate { items ->
+                            items.filterNot { it.id == item.id }
                         }
 
-                        appState = appState.copy(
-                            navState = appState.navState
-                                .copy(
-                                    backStack = appState.navState
-                                        .backStack
-                                        .filter {
-                                            it != item
-                                        },
-                                ),
+                        val currentState = appState
+                        appState = currentState.copy(
+                            navState = NavState.fromEntries(
+                                currentState.navState.entries.filterNot {
+                                    it.id == item.id
+                                },
+                            ).requireValid(),
                         )
                     },
                 )
             }
         }
 
-        rememberedModalDestinations.set(modalDestinations)
+        rememberedModalEntries.set(modalEntries)
     }
 }
 
 // TODO: create separated solution
-private fun getContentScreen(destination: Destination): Screen {
-    val result = when (destination) {
-        is Home -> HomeScreen(destination)
-        is Accounts -> AccountsScreen(destination)
-        is Transactions -> TransactionsScreen(destination)
-        is Cards -> CardsScreen(destination)
-        is AccountDetails -> AccountDetailsScreen(destination)
+private fun getContentScreen(entry: BackStackEntry): Screen {
+    val result = when (entry.route) {
+        is Home -> HomeScreen(entry)
+        is Accounts -> AccountsScreen(entry)
+        is Transactions -> TransactionsScreen(entry)
+        is Cards -> CardsScreen(entry)
+        is AccountDetails -> AccountDetailsScreen(entry)
         else -> null
     }
 
@@ -190,9 +208,9 @@ private fun getContentScreen(destination: Destination): Screen {
 }
 
 // TODO: create separated solution
-private fun getModalScreen(destination: Destination): ModalScreen {
-    val result = when (destination) {
-        is Account -> AccountBottomSheet(destination)
+private fun getModalScreen(entry: BackStackEntry): ModalScreen {
+    val result = when (entry.route) {
+        is Account -> AccountBottomSheet(entry)
         else -> null
     }
 

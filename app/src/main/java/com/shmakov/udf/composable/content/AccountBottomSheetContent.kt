@@ -9,7 +9,10 @@ import androidx.compose.ui.Modifier
 import com.shmakov.udf.UdfApp
 import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.AccountDetails
+import com.shmakov.udf.navigation.BackStackEntry
 import com.shmakov.udf.navigation.NavActionType
+import com.shmakov.udf.navigation.NavState
+import com.shmakov.udf.navigation.requireValid
 
 @Composable
 fun ColumnScope.AccountBottomSheetContent(
@@ -19,10 +22,12 @@ fun ColumnScope.AccountBottomSheetContent(
         Button(
             onClick = {
                 UdfApp.appState = UdfApp.appState.copy(
-                    navState = UdfApp.appState.navState.copy(
-                        backStack = UdfApp.appState.navState.backStack + Account(accountId = accountId + 1),
-                        lastNavActionType = NavActionType.Push,
-                    )
+                    navState = NavState.fromEntries(
+                        UdfApp.appState.navState.entries + BackStackEntry.create(
+                            Account(accountId = accountId + 1),
+                        ),
+                    ).requireValid(),
+                    lastNavActionType = NavActionType.Push,
                 )
             },
         ) {
@@ -33,12 +38,14 @@ fun ColumnScope.AccountBottomSheetContent(
     Button(
         onClick = {
             UdfApp.appState = UdfApp.appState.copy(
-                navState = UdfApp.appState.navState.copy(
-                    backStack = UdfApp.appState.navState.backStack + AccountDetails(
-                        accountId = accountId
+                navState = NavState.fromEntries(
+                    UdfApp.appState.navState.entries + BackStackEntry.create(
+                        AccountDetails(
+                            accountId = accountId,
+                        ),
                     ),
-                    lastNavActionType = NavActionType.Push,
-                )
+                ).requireValid(),
+                lastNavActionType = NavActionType.Push,
             )
         },
         modifier = Modifier

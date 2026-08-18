@@ -30,17 +30,13 @@
 
 ## Текущая модель
 
-`AppState` содержит `NavState`, а `NavState` содержит:
+`AppState` содержит `NavState`, а `NavState` — непустой список `BackStackEntry(id, route)`. Route описывает semantic target и arguments, а entry ID — конкретное появление route в истории. Модель проверяет content-root, однозначный content/modal kind и уникальность IDs.
 
-- `backStack: List<Destination>`;
-- `lastNavActionType: Push | Pop | Replace`.
+Открытые `ContentRoute` и `ModalRoute` позволяют приложению объявлять собственные routes. Versioned primitive snapshot отделён от route objects; приложение подключает их через `RouteCodec`, а восстановление всегда повторно использует validation `NavState`.
 
-У `Destination` есть две основные категории:
+Временный `lastNavActionType: Push | Pop | Replace` больше не является частью сериализуемого `NavState`, но до появления reducer всё ещё хранится в demo `AppState`.
 
-- `Content` — fullscreen- или nested-экран;
-- `Modal` — сейчас рендерится как bottom sheet.
-
-`AnimatedNavigation(navState, into)` сворачивает back stack и выбирает content для конкретного UI-слота. `Screen.whereToShowChild` может вернуть другой слот, поэтому одна логическая история имеет разные физические layout-проекции.
+`AnimatedNavigation(navState, lastNavActionType)` сворачивает entries и выбирает content для конкретного внутреннего render slot. `Screen.whereToShowChild` может вернуть другой слот, поэтому одна логическая история имеет разные физические layout-проекции.
 
 Для `Home -> Accounts -> Account(1)`:
 
@@ -88,12 +84,14 @@ Route отвечает на вопрос «куда», entry — «какое и
 Можно считать подтверждёнными следующие наблюдения:
 
 - navigation history может храниться в application state;
+- route equality можно отделить от стабильной identity каждого появления route;
+- структурные инварианты и snapshot round trip можно тестировать как чистый Kotlin;
 - content и modal destinations могут участвовать в единой последовательности Back;
 - responsive placement можно вычислять без переписывания логической истории;
 - branch replacement полезен, когда родитель остаётся видимым и выбирает другого ребёнка;
 - удалённый modal entry иногда нужно временно удерживать в presentation state до завершения exit-анимации.
 
-Пока не доказано, что текущая модель корректна для произвольного валидного state, быстрых событий, lifecycle restoration и сложных анимаций.
+Пока не доказана корректность reducer/projection/renderer для произвольного валидного state, быстрых событий, lifecycle restoration и сложных анимаций.
 
 ## Текущий data flow
 
@@ -117,10 +115,10 @@ Typed actions, чистого reducer, effect boundary и lifecycle-aware store 
 
 ### Модель и идентичность
 
-- `NavState` допускает пустой stack или modal root, хотя renderer ожидает content root.
-- route data и back-stack entry identity смешаны внутри `Destination`.
-- параметризованные destinations используют процессный counter, а singleton destinations не представляют два независимых entry.
-- `lastNavActionType` хранит историческое событие перехода внутри долгоживущего navigation state.
+- `NavState` уже отделяет semantic route от entry identity и отклоняет empty stack, non-content root, неоднозначный route kind, blank или duplicate IDs.
+- ID создаётся на application boundary и сохраняется как строка; будущий pure reducer не должен генерировать случайность внутри reduction.
+- primitive snapshot и codec существуют, но ещё не подключены к `SavedStateHandle` и process-death lifecycle.
+- `lastNavActionType` вынесен из сериализуемого `NavState`, но его окончательный transient-контракт должен определить reducer.
 
 ### Проекция и рендеринг
 
@@ -139,13 +137,13 @@ Typed actions, чистого reducer, effect boundary и lifecycle-aware store 
 
 ### Back и гонки событий
 
-- Back handler проверяет размер стека во время composition, но callback не проверяет актуальный state перед pop.
-- повторные события до recomposition могут удалить защищённый root.
+- `NavState` и повторная проверка в Back callback защищают root от удаления.
+- остальные быстрые события всё ещё выполняют распределённые read-modify-write и будут сериализованы только единым store.
 - semantics push, pop, replace и dismiss реализованы в разных местах.
 
 ### Надёжность и поддержка
 
-- reducer-, projection-, restoration- и UI navigation tests отсутствуют;
+- model/identity/snapshot покрыты pure Kotlin contract tests, но reducer-, projection-, lifecycle- и UI navigation tests ещё отсутствуют;
 - Android/Compose toolchain отражает исходный прототип и должен обновляться только после появления safety net;
 - demo UI смешивает Material 2 и Material 3.
 
@@ -185,7 +183,7 @@ fun project(
 ): NavigationTree
 ```
 
-Конкретные типы ещё не являются окончательным решением. Важно отделить стабильную entry identity, сериализуемые route data, чистые transitions, чистую projection и presentation-only animation state.
+Route, entry identity, validated `NavState` и primitive snapshot уже реализуют первую границу этой схемы. Конкретные reducer-, projection- и animation-типы ещё не являются окончательным решением.
 
 ## Обязательные инварианты
 
@@ -255,8 +253,9 @@ fun project(
 - `app/src/main/java/com/shmakov/udf/AppState.kt`
 - `app/src/main/java/com/shmakov/udf/UdfApp.kt`
 - `app/src/main/java/com/shmakov/udf/MainActivity.kt`
-- `app/src/main/java/com/shmakov/udf/navigation/Destination.kt`
+- `app/src/main/java/com/shmakov/udf/navigation/Route.kt`
 - `app/src/main/java/com/shmakov/udf/navigation/NavState.kt`
+- `app/src/main/java/com/shmakov/udf/navigation/NavStateSnapshot.kt`
 - `app/src/main/java/com/shmakov/udf/navigation/Screen.kt`
 - `app/src/main/java/com/shmakov/udf/composable/common/AnimatedNavigation.kt`
 - `app/src/main/java/com/shmakov/udf/composable/common/BottomSheetLayout.kt`

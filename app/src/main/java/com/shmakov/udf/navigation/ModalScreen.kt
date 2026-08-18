@@ -3,7 +3,7 @@ package com.shmakov.udf.navigation
 import androidx.compose.runtime.Composable
 
 abstract class ModalScreen(
-    open val destination: Destination,
+    open val entry: BackStackEntry,
 ) {
 
     @Composable

@@ -24,10 +24,12 @@ class UdfApp : Application() {
     companion object {
         var appState by mutableStateOf(
             AppState(
-                navState = NavState(
-                    listOf(Home, Accounts, Account(accountId = 1)),
-                    lastNavActionType = NavActionType.Replace,
+                navState = NavState.history(
+                    root = Home,
+                    Accounts,
+                    Account(accountId = 1),
                 ),
+                lastNavActionType = NavActionType.Replace,
                 showInPlace = false,
             )
         )
