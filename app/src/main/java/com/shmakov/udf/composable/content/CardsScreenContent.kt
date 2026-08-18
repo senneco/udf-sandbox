@@ -6,7 +6,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import timber.log.Timber
 
 @Composable
 fun CardsScreenContent() {
@@ -14,5 +13,15 @@ fun CardsScreenContent() {
         text = "Cards Screen", modifier = Modifier
             .fillMaxSize()
             .background(color = Color.Blue)
+    )
+}
+
+@Composable
+fun CardScreenContent(cardId: Int) {
+    Text(
+        text = "Card Screen #$cardId",
+        modifier = Modifier
+            .fillMaxSize()
+            .background(color = Color.Blue),
     )
 }

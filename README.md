@@ -31,7 +31,7 @@ Navigation as state имеет смысл, только если модель н
 | --- | --- | --- |
 | `Home -> Accounts -> Account(1)` | `Accounts` занимает root, поверх открыт account bottom sheet | `Home` остаётся в root, `Accounts` показан во вложенном слоте, поверх открыт тот же sheet |
 
-Layout policy не читает Android configuration: host выбирает её по доступному пространству и передаёт явно. Compose-renderer пока ещё использует legacy `HomeScreen.whereToShowChild` и orientation; подключение `NavigationRenderTree` вместо этого fold относится к [#13](https://github.com/senneco/udf-sandbox/issues/13).
+Layout policy не читает Android configuration: host выбирает её явно и передаёт projector-у. Текущий demo host использует простую orientation heuristic — portrait выбирает single-pane, landscape выбирает expanded-pane; это ещё не полноценная window-size policy. Compose-renderer получает уже готовый `NavigationRenderTree`; screens больше не выбирают placement и получают только явный дочерний content-slot.
 
 ## Целевой UDF-цикл
 
@@ -47,7 +47,7 @@ flowchart LR
     UI -->|"анимация завершена"| Action
 ```
 
-Navigation core уже содержит валидируемую entry model, сохраняемое primitive-представление истории, typed `NavAction`, чистый `NavReducer` и чистую stack-to-layout projection. Activity-scoped `AppViewModel` владеет demo-specific `AppStore`, публикует immutable frames через read-only `StateFlow` и сериализует actions перед reducer. Compose наблюдает flow с учётом lifecycle и передаёт события наверх через явные callbacks. Следующий архитектурный шаг — перевести renderer на отдельные previous и target projections.
+Navigation core уже содержит валидируемую entry model, сохраняемое primitive-представление истории, typed `NavAction`, чистый `NavReducer` и чистую stack-to-layout projection. Activity-scoped `AppViewModel` владеет demo-specific `AppStore`, публикует immutable frames через read-only `StateFlow` и сериализует actions перед reducer. Compose наблюдает flow с учётом lifecycle, проецирует текущий state и передаёт renderer-у атомарный target. Следующий архитектурный шаг — заменить временный modal bookkeeping явной моделью retained modal entries.
 
 ## Текущее состояние
 
@@ -64,12 +64,16 @@ Navigation core уже содержит валидируемую entry model, с
 - lifecycle-aware Compose collection и явные callbacks без глобальных state imports в UI;
 - чистую stack-to-layout projection с явной application-owned layout policy;
 - immutable root-, nested- и modal-слоты с exact-ID ownership modal layers;
+- Compose-rendering outgoing и incoming ветвей из их собственных immutable trees;
+- process-local revision, которая отличает новый navigation transition от layout reprojection;
+- typed destination binding всего дерева до вызова destination composables;
+- exhaustive demo-renderers для всех объявленных routes без nullable lookup и `!!`;
 - content и modal destinations в одной логической истории;
 - вложенный рендеринг в landscape;
 - анимированные переходы между content;
 - синхронизацию закрытия bottom sheet обратно в navigation state.
 
-Известные ограничения: store пока является внутренней demo-интеграцией, snapshot не подключён к process-death restoration, а Compose-renderer ещё не потребляет чистую projection. Неполная регистрация routes и legacy modal bookkeeping также остаются внутри renderer; lifecycle-restoration tests ещё отсутствуют. Подробный baseline, ограничения и целевая архитектура описаны в [контексте проекта](docs/PROJECT_CONTEXT.md).
+Известные ограничения: store остаётся внутренней demo-интеграцией, snapshot не подключён к process-death restoration, а retained modal bookkeeping всё ещё является legacy-частью renderer-а. Presentation boundary также пока не стала согласованным library API: `Screen`/`ModalScreen` публичны, но destination catalog и renderer internal, а обязательность вызова `childContent` для screen-владельца вложенного slot не обеспечивается типами. Lifecycle-restoration tests и application-defined animation policy ещё отсутствуют. Подробный baseline, ограничения и целевая архитектура описаны в [контексте проекта](docs/PROJECT_CONTEXT.md).
 
 Базовая модель намеренно читается без framework-specific терминов:
 
@@ -121,7 +125,42 @@ when (val projection = NavProjector.project(state, expandedPane)) {
 
 `NavigationRenderTree` и списки внутри `ContentPlacementRequest` делают defensive unmodifiable copies. Invalid child owner, явный policy reject, exception или Java `null` возвращаются соответственно как `NavProjectionProblem.InvalidSlotOwner`, `PolicyRejected` или `PolicyFailed`, а не как частичное дерево. Структурно невалидная history, включая modal-first, отклоняется раньше через `NavState.fromEntries(...)`.
 
-Projection намеренно не знает о Compose и route-to-screen registry: она размещает любые валидные `ContentRoute`/`ModalRoute`. Exhaustive destination binding и фактическое потребление дерева renderer-ом относятся к [#13](https://github.com/senneco/udf-sandbox/issues/13).
+Projection намеренно не знает о Compose и route-to-screen registry: она размещает любые валидные `ContentRoute`/`ModalRoute`. На renderer boundary `DestinationTreeBinder` атомарно разрешает всё дерево через application-owned catalog. Unsupported route, неверный content/modal kind, exception или Java `null` становятся typed failure до вызова destination composables.
+
+## Compose renderer
+
+Demo host связывает state, layout и presentation в одном направлении:
+
+```mermaid
+flowchart LR
+    Frame["AppStateFrame(state, revision, intent)"] --> Projector["NavProjector"]
+    Window["Window configuration"] --> Policy["Layout policy"]
+    Policy --> Projector
+    Projector --> Tree["NavigationRenderTree"]
+    Tree --> Target["NavigationRenderTarget"]
+    Target --> Renderer["AnimatedNavigation"]
+    Renderer --> Binder["DestinationTreeBinder"]
+    Binder --> Branches["Bound outgoing / target branches"]
+```
+
+`navigationRevision` увеличивается только для `NavReduction.Changed`. Она не сериализуется и не хранит animation progress. Renderer-local accepted-target holder живёт в течение lifetime текущей composition и сохраняет последний успешно принятый target только для классификации следующего update. Отдельно Compose transition удерживает outgoing `BoundRenderState` лишь пока выполняется активная exit-анимация. Ни один из этих объектов не попадает в store, `NavState` или snapshot.
+
+Motion выбирается с явной precedence: planner сначала требует уже принятый previous target, ровно следующую revision и изменение visible content-ID path, затем проверяет exact IDs соответствующего intent. Любое невыполненное условие даёт `None`; поэтому modal-only Push или Pop не запускает content-анимацию.
+
+| Изменение | Content motion |
+| --- | --- |
+| exact contiguous content-changing `Pushed` | slide влево |
+| exact contiguous content-changing `Popped` | slide вправо |
+| exact contiguous visible `BranchReplaced` / `HistoryReplaced` | fade |
+| первый render или renderer/composition recreation | без navigation-анимации |
+| та же revision с другой layout projection | без navigation-анимации |
+| пропущенная/rollback revision, null или stale/incompatible intent, неизменный visible content path, включая modal-only change | без content-анимации |
+
+Каждая lambda `AnimatedContent` рендерит только переданный ей `branchState.tree`. Поэтому при переходе из expanded `Home -> Accounts -> Account(1)` в `AccountDetails(1)` outgoing-ветка сохраняет собственные `Home`, nested `Accounts` и sheet до конца exit, а incoming-ветка независимо рендерит details. Root и nested content используют точный `BackStackEntry.id` как Compose identity.
+
+Renderer передаёт каждому content-screen явный `childContent`. Screen, который может стать владельцем `ChildOf(...)`, обязан вызвать эту lambda ровно в нужном месте; текущая demo policy создаёт child только у `Home`, а leaf screens её не вызывают. Этот договор и разрыв между публичными `Screen`/`ModalScreen` и internal catalog/renderer остаются незавершённой demo boundary, а не рекомендуемым consumer API.
+
+Scoped device gate и два landscape-кадра для regression #13 сохранены в [evidence issue #13](docs/evidence/issue-13/README.md).
 
 ## Переходы состояния
 
@@ -188,23 +227,30 @@ when (val reduction = NavReducer.reduce(state, action)) {
 
 ## Lifecycle-aware host
 
-Demo host не является частью публичного navigation core. Он показывает минимальную Android-границу: `AppStore` атомарно публикует immutable `AppState` и transition metadata одним `AppStateFrame`, а `AppViewModel` удерживает store в lifecycle конкретной Activity.
+Demo host не является частью публичного navigation core. Он показывает минимальную Android-границу: `AppStore` атомарно публикует immutable `AppState`, process-local revision и transition metadata одним `AppStateFrame`, а `AppViewModel` удерживает store в lifecycle конкретной Activity.
 
 ```kotlin
 private val appViewModel: AppViewModel by viewModels()
 
 setContent {
     val frame by appViewModel.frames.collectAsStateWithLifecycle()
+    val policy = selectPolicy(LocalConfiguration.current)
 
-    AnimatedNavigation(
-        navState = frame.appState.navState,
-        navTransition = frame.navigationTransition,
-        onNavigationAction = { action -> appViewModel.dispatch(action) },
-    )
+    when (val result = NavProjector.project(frame.appState.navState, policy)) {
+        is NavProjectionResult.Success -> AnimatedNavigation(
+            renderTarget = NavigationRenderTarget(
+                navigationRevision = frame.navigationRevision,
+                tree = result.tree,
+                transitionIntent = frame.navigationTransition,
+            ),
+            onNavigationAction = appViewModel::dispatch,
+        )
+        is NavProjectionResult.Failure -> showProjectionFailure(result.problem)
+    }
 }
 ```
 
-`dispatch` всегда применяет action к последнему committed state под одной короткой критической секцией. `Changed` публикует один согласованный frame, а `Unchanged` сохраняет тот же frame instance и не создаёт ложную анимацию. Transition — process-local metadata текущего frame, sticky до следующего `Changed`; он не является pending event и не восстанавливается из snapshot.
+`dispatch` всегда применяет action к последнему committed state под одной короткой критической секцией. `Changed` публикует один согласованный frame и увеличивает revision, а `Unchanged` сохраняет тот же frame instance. Transition — process-local metadata текущего frame, sticky до следующего `Changed`; он не является pending event и не восстанавливается из snapshot. Initial render, renderer/composition recreation — включая Activity configuration recreation с сохранённым ViewModel — layout-only reprojection и пропуск промежуточного frame не переигрывают этот intent. Это не означает process-death restoration: после смерти процесса demo всё ещё создаёт hard-coded начальную history.
 
 ## Карта кода
 
@@ -212,9 +258,11 @@ setContent {
 - [`UdfApp.kt`](app/src/main/java/com/shmakov/udf/UdfApp.kt) — только application initialization и logging; navigation state там не хранится.
 - [`navigation/`](app/src/main/java/com/shmakov/udf/navigation) — routes, back-stack entries, валидируемый navigation state, actions/reducer, snapshot/codec и screen abstractions.
 - [`NavigationProjection.kt`](app/src/main/java/com/shmakov/udf/navigation/NavigationProjection.kt) — pure Kotlin layout policy, immutable render tree и typed projection results.
-- [`AnimatedNavigation.kt`](app/src/main/java/com/shmakov/udf/composable/common/AnimatedNavigation.kt) — legacy stack fold, вложенный Compose-rendering, content transitions и modal bookkeeping; пока не переведён на `NavigationRenderTree`.
+- [`NavigationPresentation.kt`](app/src/main/java/com/shmakov/udf/NavigationPresentation.kt) — renderer-target, exact-intent validation и выбор content motion.
+- [`DestinationTreeBinding.kt`](app/src/main/java/com/shmakov/udf/composable/common/DestinationTreeBinding.kt) — атомарный typed route-to-screen binding всего projected tree.
+- [`AnimatedNavigation.kt`](app/src/main/java/com/shmakov/udf/composable/common/AnimatedNavigation.kt) — recursive root/nested rendering из branch-owned trees, entry-ID keys и content transitions.
 - [`BottomSheetLayout.kt`](app/src/main/java/com/shmakov/udf/composable/common/BottomSheetLayout.kt) — временное animation state bottom sheet.
-- [`composable/screen/`](app/src/main/java/com/shmakov/udf/composable/screen) — адаптеры экранов и правила размещения дочернего content.
+- [`composable/screen/`](app/src/main/java/com/shmakov/udf/composable/screen) — destination adapters с typed actions и явным `childContent` slot.
 - [`composable/content/`](app/src/main/java/com/shmakov/udf/composable/content) — минимальный demo UI и текущие navigation triggers.
 
 ## Roadmap и задачи

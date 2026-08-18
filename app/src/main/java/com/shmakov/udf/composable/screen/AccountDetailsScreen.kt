@@ -10,8 +10,7 @@ class AccountDetailsScreen(
 
     @Composable
     override fun Content(
-        nestedEntries: List<BackStackEntry>,
-        navTransition: NavTransitionIntent?,
+        childContent: @Composable () -> Unit,
         onNavigationAction: (NavAction) -> Unit,
     ) {
         val route = entry.route as AccountDetails

@@ -6,7 +6,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import timber.log.Timber
 
 @Composable
 fun TransactionsScreenContent() {
@@ -15,5 +14,15 @@ fun TransactionsScreenContent() {
         modifier = Modifier
             .fillMaxSize()
             .background(color = Color.Red)
+    )
+}
+
+@Composable
+fun TransactionScreenContent(transactionId: Int) {
+    Text(
+        text = "Transaction Screen #$transactionId",
+        modifier = Modifier
+            .fillMaxSize()
+            .background(color = Color.Red),
     )
 }
