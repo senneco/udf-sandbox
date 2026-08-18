@@ -73,9 +73,9 @@ Navigation core уже содержит валидируемую entry model, с
 - content и modal destinations в одной логической истории;
 - вложенный рендеринг в landscape;
 - анимированные переходы между content;
-- синхронизацию закрытия bottom sheet обратно в navigation state.
+- state-authoritative закрытие bottom sheet с phase-scoped request/completion, retry прерванных Material mutations и exact-ID Back.
 
-Известные ограничения: store остаётся внутренней demo-интеграцией, snapshot не подключён к process-death restoration, а Material bottom-sheet bridge построен поверх старой beta-версии Material 3. Базовый request/completion contract проверен, но cancellation, изменение anchors при resize, recreation и быстрые повторные жесты остаются недоказанными race-сценариями для [issue #15](https://github.com/senneco/udf-sandbox/issues/15). Presentation boundary также пока не стала согласованным library API: `Screen`/`ModalScreen` публичны, но destination catalog и renderer internal, а обязательность вызова `childContent` для screen-владельца вложенного slot не обеспечивается типами. Lifecycle-restoration tests и application-defined animation policy ещё отсутствуют. Подробный baseline, ограничения и целевая архитектура описаны в [контексте проекта](docs/PROJECT_CONTEXT.md).
+Известные ограничения: store остаётся внутренней demo-интеграцией, snapshot не подключён к process-death restoration, а Material bottom-sheet bridge построен поверх старой beta-версии Material 3. Cancellation, изменение geometry/anchors, быстрые повторные жесты и stale Back теперь имеют детерминированный safety net, но recreation и process-death restoration всё ещё требуют отдельной lifecycle-интеграции. Presentation boundary также пока не стала согласованным library API: `Screen`/`ModalScreen` публичны, но destination catalog и renderer internal, а обязательность вызова `childContent` для screen-владельца вложенного slot не обеспечивается типами. Application-defined animation policy ещё отсутствует. Подробный baseline, ограничения и целевая архитектура описаны в [контексте проекта](docs/PROJECT_CONTEXT.md).
 
 Базовая модель намеренно читается без framework-specific терминов:
 
@@ -163,11 +163,11 @@ Motion выбирается с явной precedence: planner сначала т�
 
 Каждая root-ветка также владеет собственным process-local `ModalPresentationState`. При contiguous navigation revision пропавший modal немедленно исчезает из durable `NavState`, но остаётся в renderer-е как `Exiting(entryId, generation)` до завершения именно своей анимации. Пакетные add/remove не теряют соседние layers, одинаковые routes различаются по entry ID, reorder безопасно snap-ится к текущему desired order, а callback со старым generation становится no-op. Candidate presentation вычисляется чисто во время composition и принимается только в `SideEffect`; каждый layer рендерится в geometry exact `ownerContentEntryId`, а disposal исчезнувшей owner-ветки освобождает только захваченный exit token. `onDismissRequest` отправляет exact-ID action reducer-у, тогда как `onExitFinished` меняет только renderer-local presentation.
 
-Bottom-sheet bridge считает presentation state единственным источником истины. Scrim tap и swipe-to-hide только отправляют dismiss request; локальный переход Material в `Hidden` при ещё desired modal отклоняется. Лишь полученный после reducer-а durable `Hidden` запускает suspend `hide()`, после которого phase-scoped guard сообщает completion ровно один раз для этой exit-фазы. Этот доказанный базовый порядок не распространяется автоматически на cancellation, anchor resize, recreation и быстрые повторные gestures из scope #15.
+Bottom-sheet bridge считает presentation state единственным источником истины. Standard `BottomSheetScaffold` использует `PartiallyExpanded` с нулевым peek как физически скрытое положение и `Expanded` как показанное; `confirmValueChange` остаётся чистым. Scrim, swipe и accessibility collapse запрашивают exact-ID dismiss не более одного раза за принятую `Shown`-фазу. Если durable state не подтверждает запрос, sheet сходится обратно к `Expanded`; после принятого удаления `Exiting`-фаза сходится к `PartiallyExpanded` и только затем завершает захваченный exit token. Каждая Material mutation выполняется в supervised child и повторяется после внутренней cancellation, тогда как отменённая renderer-фаза не может завершить уже новое состояние. Изменение geometry перезапускает ту же фазу и сначала нормализует старую beta-версию Material через `PartiallyExpanded -> Expanded`, чтобы stale offset не пережил resize.
 
 Renderer передаёт каждому content-screen явный `childContent`. Screen, который может стать владельцем `ChildOf(...)`, обязан вызвать эту lambda ровно в нужном месте; текущая demo policy создаёт child только у `Home`, а leaf screens её не вызывают. Этот договор и разрыв между публичными `Screen`/`ModalScreen` и internal catalog/renderer остаются незавершённой demo boundary, а не рекомендуемым consumer API.
 
-Scoped device gate и два landscape-кадра для regression #13 сохранены в [evidence issue #13](docs/evidence/issue-13/README.md). Отдельный gate retained-modal lifecycle, Material bridge, пять portrait-кадров и owner-placement landscape-кадр находятся в [evidence issue #14](docs/evidence/issue-14/README.md).
+Scoped device gate и два landscape-кадра для regression #13 сохранены в [evidence issue #13](docs/evidence/issue-13/README.md). Gate retained-modal lifecycle и owner placement находятся в [evidence issue #14](docs/evidence/issue-14/README.md). Cancellation-safe bottom-sheet convergence, exact modal Back, реальный swipe и финальные кадры собраны в [evidence issue #15](docs/evidence/issue-15/README.md).
 
 ## Переходы состояния
 
@@ -182,8 +182,11 @@ val pushed = NavReducer.reduce(
     NavAction.push(state.top.id, AccountDetails(accountId = 42)),
 )
 
-// Android Back удаляет ровно верхний entry и безопасно останавливается на root.
+// Content Back использует Pop и безопасно останавливается на root.
 val back = NavReducer.reduce(pushed.state, NavAction.Pop)
+
+// Host materializes modal Back как exact-ID dismiss: stale replay не удалит content под ним.
+val modalBack = NavAction.dismissModal(state.top.id)
 
 // Если Home не top, NavigateFrom удаляет его descendants и создаёт новую ветку.
 val branch = NavReducer.reduce(
@@ -267,9 +270,10 @@ setContent {
 - [`NavigationProjection.kt`](app/src/main/java/com/shmakov/udf/navigation/NavigationProjection.kt) — pure Kotlin layout policy, immutable render tree и typed projection results.
 - [`NavigationPresentation.kt`](app/src/main/java/com/shmakov/udf/NavigationPresentation.kt) — renderer-target, exact-intent validation и выбор content motion.
 - [`ModalPresentation.kt`](app/src/main/java/com/shmakov/udf/ModalPresentation.kt) — чистый retained-modal planner, generation tokens и safe reorder fallback.
+- [`BottomSheetPresentation.kt`](app/src/main/java/com/shmakov/udf/composable/common/BottomSheetPresentation.kt) — phase-owned request/completion и cancellation-safe convergence Material motion.
 - [`DestinationTreeBinding.kt`](app/src/main/java/com/shmakov/udf/composable/common/DestinationTreeBinding.kt) — атомарный typed route-to-screen binding всего projected tree.
 - [`AnimatedNavigation.kt`](app/src/main/java/com/shmakov/udf/composable/common/AnimatedNavigation.kt) — recursive root/nested rendering из branch-owned trees, entry-ID keys, content transitions и branch-owned modal presentation.
-- [`BottomSheetLayout.kt`](app/src/main/java/com/shmakov/udf/composable/common/BottomSheetLayout.kt) — state-authoritative request/hide/completion bridge к Material bottom sheet.
+- [`BottomSheetLayout.kt`](app/src/main/java/com/shmakov/udf/composable/common/BottomSheetLayout.kt) — state-authoritative request/convergence/completion bridge к Material bottom sheet.
 - [`composable/screen/`](app/src/main/java/com/shmakov/udf/composable/screen) — destination adapters с typed actions и явным `childContent` slot.
 - [`composable/content/`](app/src/main/java/com/shmakov/udf/composable/content) — минимальный demo UI и текущие navigation triggers.
 

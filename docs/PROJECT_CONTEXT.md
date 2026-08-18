@@ -26,7 +26,7 @@
 - начальная demo-история: `Home -> Accounts -> Account(1)`;
 - navigation model, snapshot, reducer, store, projection и renderer presentation покрыты contract tests.
 
-Проект остаётся sandbox, а не production-приложением. State/reducer/projection/renderer boundaries уже разделены; lifecycle restoration и расширенная проверка Material bottom-sheet races пока не завершены.
+Проект остаётся sandbox, а не production-приложением. State/reducer/projection/renderer boundaries уже разделены; lifecycle restoration пока не завершён, а Material bottom-sheet boundary уже имеет отдельный deterministic race safety net.
 
 ## Текущая модель
 
@@ -42,7 +42,7 @@ Navigation input представлен закрытым набором typed `N
 
 Projection отделена от Android и Compose. Host выбирает policy и передаёт renderer-у `NavigationRenderTarget(revision, tree, intent)`. Внутри `AnimatedNavigation` destination binder атомарно разрешает весь tree до вызова любого destination composable. Renderer-local accepted-target holder хранит последний успешно принятый target в течение lifetime composition для проверки следующего update; отдельно Compose transition удерживает outgoing bound branch только до завершения активной exit-анимации. Эти presentation-объекты не хранятся в store, `NavState` или snapshot. Screens больше не сворачивают history и не выбирают placement.
 
-Modal presentation также отделена от durable state. Каждая root-ветка renderer-а владеет process-local `ModalPresentationState`: desired layers приходят из projection, а удалённые entries временно остаются `Exiting` с точным `ModalExitToken(entryId, generation)`. Pure planner обрабатывает batch add/remove, exact-ID identity, layout/revision semantics и safe reorder fallback. Candidate state и bindings принимаются только через `SideEffect` после успешной composition; каждый layer рендерится в geometry exact `ownerContentEntryId`, а disposal исчезнувшей owner-ветки освобождает только её token. Exit completion меняет только branch-local presentation, а durable dismiss происходит раньше через reducer action. Material bridge следует тому же владению: scrim или swipe только запрашивает exact-ID dismiss, durable `Hidden` запускает suspend `hide()`, а phase-scoped guard завершает принятую exit-фазу ровно один раз.
+Modal presentation также отделена от durable state. Каждая root-ветка renderer-а владеет process-local `ModalPresentationState`: desired layers приходят из projection, а удалённые entries временно остаются `Exiting` с точным `ModalExitToken(entryId, generation)`. Pure planner обрабатывает batch add/remove, exact-ID identity, layout/revision semantics и safe reorder fallback. Candidate state и bindings принимаются только через `SideEffect` после успешной composition; каждый layer рендерится в geometry exact `ownerContentEntryId`, а disposal исчезнувшей owner-ветки освобождает только её token. Exit completion меняет только branch-local presentation, а durable dismiss происходит раньше через reducer action. Material bridge использует standard sheet state: `PartiallyExpanded` с нулевым peek — физически скрытое положение, `Expanded` — показанное. Phase-owned callbacks отделяют один dismiss request от одного exit completion; внутренне отменённая Material mutation повторяется в supervised child, а cancellation renderer-фазы не может завершить stale token.
 
 Content motion имеет явную precedence: нужен уже принятый previous target, target с revision ровно `previous + 1` и изменившийся visible content-ID path; только затем planner проверяет exact IDs intent. Content-changing Push/Pop дают directional slide, exact visible branch/history replacement — fade. Initial или renderer recreation, same-revision layout, revision gap/rollback, null или stale/incompatible intent и modal-only change дают `None`.
 
@@ -106,9 +106,10 @@ Route отвечает на вопрос «куда», entry — «какое и
 - outgoing и incoming content могут рендериться из независимых immutable projections;
 - entry ID подходит как единая identity для root и nested Compose content;
 - route catalog можно целиком разрешить до вызова destination composables с typed unsupported/failure result;
-- удалённый modal entry иногда нужно временно удерживать в presentation state до завершения exit-анимации.
+- удалённый modal entry иногда нужно временно удерживать в presentation state до завершения exit-анимации;
+- bottom-sheet request, durable dismiss, physical convergence и exit completion можно разделить без передачи Material state во владение reducer-у.
 
-Reducer contract покрывает эталонные state transitions и подключён к lifecycle-aware owner. Store contracts доказывают атомарные frames, revisions, stale callbacks, независимых owners и сериализацию concurrent actions. Projection contracts отдельно доказывают single-/expanded размещение, modal ownership, content после modal, Back reprojection, immutable collections, typed policy failures и Java API. Presentation contracts доказывают exact Push/Pop/Replace matching, suppression stale/layout/renderer-recreation motion, entry-ID identity, независимость outgoing/target trees и exhaustive destination binding; process restoration и modal races ещё не доказаны end-to-end.
+Reducer contract покрывает эталонные state transitions и подключён к lifecycle-aware owner. Store contracts доказывают атомарные frames, revisions, stale callbacks, независимых owners и сериализацию concurrent actions. Projection contracts отдельно доказывают single-/expanded размещение, modal ownership, content после modal, Back reprojection, immutable collections, typed policy failures и Java API. Presentation contracts доказывают exact Push/Pop/Replace matching, suppression stale/layout/renderer-recreation motion, entry-ID identity, независимость outgoing/target trees и exhaustive destination binding. Bottom-sheet contracts отдельно покрывают phase identity, internal cancellation retry, geometry/anchor churn, repeated dismiss sources и exact modal Back; process restoration остаётся незавершённым.
 
 ## Текущий data flow
 
@@ -172,19 +173,22 @@ UI / renderer callback -> AppViewModel.dispatch(NavAction)
 - пакетно удалённые layers получают независимые generation tokens и освобождаются только собственными completion callbacks; stale/duplicate/ABA completion является no-op;
 - `onDismissRequest` сразу отправляет exact-ID reducer action, а `onExitFinished` изменяет только presentation state;
 - candidate state не записывается во время composition: commit выполняется в `SideEffect`, а удалённый destination использует уже принятый binding;
-- scrim tap и swipe-to-hide являются только request: пока modal остаётся `Shown`, bridge не разрешает Material самостоятельно стать каноническим `Hidden`;
-- durable `Hidden` запускает suspend `hide()`, после чего phase-scoped guard вызывает completion ровно один раз, включая уже невидимый sheet;
-- на старой beta-версии Material 3 ещё не доказаны cancellation, изменение anchors при resize, recreation и быстрые повторные gesture races — это scope issue #15, а не часть durable navigation state.
+- standard `BottomSheetScaffold` трактует `PartiallyExpanded` с нулевым peek как физический collapse и `Expanded` как показанный sheet; `confirmValueChange` не вызывает application callbacks;
+- scrim, swipe и accessibility collapse проходят через один phase-scoped once-gate; без durable ack sheet сходится обратно к `Expanded`;
+- `Exiting` сходится к exact `PartiallyExpanded`, после чего захваченный phase callback завершает token ровно один раз;
+- Material mutation изолирована в supervised child: внутренняя cancellation повторяет попытку, а cancellation всей фазы запрещает stale completion;
+- изменение container или sheet geometry перезапускает ту же фазу и нормализует beta Material через `PartiallyExpanded -> Expanded`, не выдавая layout churn за dismiss request.
 
 ### Back и гонки событий
 
 - `NavState` и `NavReducer` защищают root независимо от устаревшего состояния UI callback.
 - pure reducer детерминированно останавливает быстрые Pop на root и возвращает typed no-op для stale IDs.
 - store сериализует быстрые и concurrent actions одной приватной критической секцией; stale callbacks всегда редуцируются относительно последнего committed frame.
+- host планирует Back для top modal как `DismissModal(exactEntryId)`, а для content — как `Pop`; повтор stale modal Back становится no-op и не удаляет underlying content.
 
 ### Надёжность и поддержка
 
-- model, identity, snapshot, reducer, store serialization, projection, content/modal presentation planners и destination binding покрыты contract tests, но lifecycle-restoration tests ещё отсутствуют;
+- model, identity, snapshot, reducer, store serialization, projection, content/modal presentation planners, destination binding и bottom-sheet convergence покрыты contract tests, но lifecycle-restoration tests ещё отсутствуют;
 - Android/Compose toolchain отражает исходный прототип и должен обновляться только после появления safety net;
 - demo UI смешивает Material 2 и Material 3.
 
@@ -234,7 +238,7 @@ object NavProjector {
 }
 ```
 
-Route, entry identity, validated `NavState`, primitive snapshot, pure reducer, lifecycle-aware state owner, чистая projection и branch-owned Compose rendering уже реализуют deterministic boundary этой схемы. `AppStateFrame` согласованно передаёт state, revision и transition intent renderer-у; retained-modal lifecycle отделён от durable state, а базовый Material request/hide/completion handshake является state-authoritative. Process restoration, расширенные Material race guarantees из issue #15 и настраиваемая animation policy ещё не реализованы.
+Route, entry identity, validated `NavState`, primitive snapshot, pure reducer, lifecycle-aware state owner, чистая projection и branch-owned Compose rendering уже реализуют deterministic boundary этой схемы. `AppStateFrame` согласованно передаёт state, revision и transition intent renderer-у; retained-modal lifecycle отделён от durable state, а Material request/convergence/completion handshake является state-authoritative и cancellation-safe. Process restoration и настраиваемая animation policy ещё не реализованы.
 
 ## Обязательные инварианты
 
@@ -271,7 +275,7 @@ Route, entry identity, validated `NavState`, primitive snapshot, pure reducer, l
 Это темы для отдельных issues и экспериментов, а не уже принятые решения:
 
 - Должна ли каноническая навигация остаться линейной историей или стать явным деревом?
-- Как сохранить state-authoritative Material dismiss contract при cancellation, anchor resize, recreation и быстрых повторных жестах?
+- Как восстанавливать branch-local modal presentation после process recreation, не сохраняя временный animation progress?
 - Как превратить внутреннее exact-intent matching в простой application-defined animation policy API?
 - Как normalise deep link в валидную navigation history?
 - Как привязать saveable UI state к entry при перемещении projection между слотами?
@@ -330,4 +334,4 @@ Route, entry identity, validated `NavState`, primitive snapshot, pure reducer, l
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-JVM contract suite запускается этой командой. Воспроизводимый scoped device gate, результат и landscape-кадры renderer regression #13 описаны в [`docs/evidence/issue-13/README.md`](evidence/issue-13/README.md). Retained-modal и bottom-sheet gate #14, Maestro flow, пять portrait-кадров и owner-placement landscape-кадр описаны в [`docs/evidence/issue-14/README.md`](evidence/issue-14/README.md).
+JVM contract suite запускается этой командой. Воспроизводимый scoped device gate и landscape-кадры renderer regression #13 описаны в [`docs/evidence/issue-13/README.md`](evidence/issue-13/README.md). Retained-modal и owner-placement gate #14 описан в [`docs/evidence/issue-14/README.md`](evidence/issue-14/README.md). Cancellation-safe Material convergence, exact modal Back, full instrumentation result и реальные Back/swipe кадры находятся в [`docs/evidence/issue-15/README.md`](evidence/issue-15/README.md).

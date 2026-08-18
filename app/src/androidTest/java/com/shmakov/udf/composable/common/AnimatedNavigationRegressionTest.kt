@@ -1,20 +1,31 @@
 package com.shmakov.udf.composable.common
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertLeftPositionInRootIsEqualTo
 import androidx.compose.ui.test.assertTopPositionInRootIsEqualTo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.shmakov.udf.NavigationRenderTarget
@@ -41,9 +52,11 @@ import com.shmakov.udf.navigation.Route
 import com.shmakov.udf.navigation.Screen
 import com.shmakov.udf.navigation.Transactions
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlin.math.abs
 
 @RunWith(AndroidJUnit4::class)
 class AnimatedNavigationRegressionTest {
@@ -374,6 +387,118 @@ class AnimatedNavigationRegressionTest {
     }
 
     @Test
+    fun replacingShownMaterialSheetKeepsTheDistinctNewEntryExpandedAndInteractive() {
+        composeRule.mainClock.autoAdvance = false
+        val home = entry("material-home", Home)
+        val first = entry("material-account-a", Account(accountId = 1))
+        val second = entry("material-account-b", Account(accountId = 2))
+        val currentTarget = mutableStateOf(
+            target(
+                revision = 200,
+                tree = project(state(home, first), singlePane),
+                transition = null,
+            ),
+        )
+        val probe = MaterialModalProbe()
+        val navigationActions = mutableListOf<NavAction>()
+        val catalog = MaterialBottomSheetDestinationCatalog(probe)
+        val collapseAction = SemanticsMatcher.keyIsDefined(SemanticsActions.Collapse)
+
+        composeRule.setContent {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .onGloballyPositioned { coordinates ->
+                        probe.rootHeightPx = coordinates.size.height.toFloat()
+                    },
+            ) {
+                AnimatedNavigation(
+                    renderTarget = currentTarget.value,
+                    onNavigationAction = navigationActions::add,
+                    destinationCatalog = catalog,
+                )
+            }
+        }
+        assertTrue(
+            "First sheet never reached exact Expanded geometry",
+            advanceFramesUntil {
+                probe.isExactlyExpanded(first.id) &&
+                    composeRule.onAllNodes(
+                        collapseAction,
+                        useUnmergedTree = true,
+                    ).fetchSemanticsNodes().isNotEmpty()
+            },
+        )
+        composeRule.mainClock.advanceTimeByFrame()
+        assertModalCount(first.id, 1)
+
+        composeRule.runOnIdle {
+            currentTarget.value = target(
+                revision = 201,
+                tree = project(state(home, second), singlePane),
+                transition = NavTransitionIntent.HistoryReplaced(
+                    previousTopEntryId = first.id,
+                    targetTopEntryId = second.id,
+                ),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        // The new desired sheet and old retained exit have independent Material states and IDs.
+        assertModalCount(first.id, 1)
+        assertModalCount(second.id, 1)
+        assertEquals(ModalScreenState.Hidden, probe.targetState(first.id))
+        assertEquals(ModalScreenState.Shown, probe.targetState(second.id))
+        assertEquals(emptyList<EntryId>(), probe.dismissRequests)
+        assertEquals(emptyList<NavAction>(), navigationActions)
+
+        assertTrue(
+            "Old sheet did not finish or new exact-ID sheet did not reach Expanded",
+            advanceFramesUntil {
+                modalCount(first.id) == 0 &&
+                    probe.isExactlyExpanded(second.id) &&
+                    composeRule.onAllNodes(
+                        collapseAction,
+                        useUnmergedTree = true,
+                    ).fetchSemanticsNodes().isNotEmpty()
+            },
+        )
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(first.id, 0)
+        assertModalCount(second.id, 1)
+        assertEquals(listOf(first.id), probe.exitCompletions)
+        assertEquals(emptyList<EntryId>(), probe.dismissRequests)
+        assertEquals(emptyList<NavAction>(), navigationActions)
+
+        composeRule.onNodeWithTag(modalTag(second.id), useUnmergedTree = true)
+            .assertHasClickAction()
+            .performClick()
+        composeRule.runOnIdle {
+            assertEquals(listOf(second.id), probe.interactions)
+        }
+        assertEquals(emptyList<NavAction>(), navigationActions)
+        assertTrue(probe.isExactlyExpanded(second.id))
+
+        // A real request from B still maps to B's exact durable action; A's completion emitted none.
+        composeRule.onNodeWithTag(modalTag(second.id), useUnmergedTree = true)
+            .performTouchInput {
+                swipeDown()
+            }
+        assertTrue(
+            "Distinct replacement sheet never emitted its exact dismiss request",
+            advanceFramesUntil { probe.dismissRequests == listOf(second.id) },
+        )
+        composeRule.runOnIdle {
+            assertEquals(listOf(second.id), probe.dismissRequests)
+            assertEquals(listOf(NavAction.dismissModal(second.id)), navigationActions)
+        }
+        assertEquals(ModalScreenState.Shown, probe.targetState(second.id))
+    }
+
+    @Test
     fun nestedModalUsesItsExactOwnerSlotBounds() {
         val home = entry("owner-home", Home)
         val accounts = entry("owner-accounts", Accounts)
@@ -480,6 +605,18 @@ class AnimatedNavigationRegressionTest {
             .assertCountEquals(expectedCount)
     }
 
+    private fun modalCount(entryId: EntryId): Int =
+        composeRule.onAllNodesWithTag(modalTag(entryId), useUnmergedTree = true)
+            .fetchSemanticsNodes().size
+
+    private fun advanceFramesUntil(predicate: () -> Boolean): Boolean {
+        repeat(MAX_PREDICATE_FRAMES) {
+            if (predicate()) return true
+            composeRule.mainClock.advanceTimeByFrame()
+        }
+        return predicate()
+    }
+
     private fun target(
         revision: Long,
         tree: NavigationRenderTree,
@@ -510,6 +647,7 @@ class AnimatedNavigationRegressionTest {
     private companion object {
         const val MID_ANIMATION_MILLIS = 150L
         const val AFTER_ANIMATION_MILLIS = 1_000L
+        const val MAX_PREDICATE_FRAMES = 360
         val singlePane = NavigationLayoutPolicy {
             ContentPlacementDecision.root()
         }
@@ -609,6 +747,83 @@ private class TaggedModalScreen(
                 .size(8.dp)
                 .testTag("modal:${entry.id.value}"),
         )
+    }
+}
+
+private class MaterialBottomSheetDestinationCatalog(
+    private val probe: MaterialModalProbe,
+) : DestinationCatalog {
+    override fun resolve(entry: BackStackEntry): DestinationBinding = when (entry.route) {
+        is ContentRoute -> DestinationBinding.Content(TaggedContentScreen(entry))
+        is ModalRoute -> DestinationBinding.Modal(MaterialBottomSheetModalScreen(entry, probe))
+        else -> DestinationBinding.Unsupported(entry)
+    }
+}
+
+private class MaterialBottomSheetModalScreen(
+    override val entry: BackStackEntry,
+    private val probe: MaterialModalProbe,
+) : ModalScreen(entry) {
+    @Composable
+    override fun ModalContent(
+        targetState: ModalScreenState,
+        onDismissRequest: () -> Unit,
+        onExitFinished: () -> Unit,
+        onNavigationAction: (NavAction) -> Unit,
+    ) {
+        SideEffect {
+            probe.targetStates[entry.id] = targetState
+        }
+        BottomSheetLayout(
+            targetState = targetState,
+            onDismissRequest = {
+                probe.dismissRequests += entry.id
+                onDismissRequest()
+            },
+            onExitFinished = {
+                probe.exitCompletions += entry.id
+                onExitFinished()
+            },
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .clickable { probe.interactions += entry.id }
+                    .testTag("modal:${entry.id.value}")
+                    .onGloballyPositioned { coordinates ->
+                        probe.geometry[entry.id] = MaterialModalGeometry(
+                            heightPx = coordinates.size.height,
+                            topPx = coordinates.positionInRoot().y,
+                        )
+                    },
+            )
+        }
+    }
+}
+
+private data class MaterialModalGeometry(
+    val heightPx: Int,
+    val topPx: Float,
+)
+
+private class MaterialModalProbe {
+    var rootHeightPx: Float = 0f
+    val targetStates = mutableMapOf<EntryId, ModalScreenState>()
+    val geometry = mutableMapOf<EntryId, MaterialModalGeometry>()
+    val dismissRequests = mutableListOf<EntryId>()
+    val exitCompletions = mutableListOf<EntryId>()
+    val interactions = mutableListOf<EntryId>()
+
+    fun targetState(entryId: EntryId): ModalScreenState =
+        checkNotNull(targetStates[entryId]) { "No target state recorded for $entryId" }
+
+    fun isExactlyExpanded(entryId: EntryId): Boolean {
+        val current = geometry[entryId] ?: return false
+        return rootHeightPx > 0f &&
+            current.heightPx > 0 &&
+            current.topPx >= 0f &&
+            abs(current.topPx + current.heightPx - rootHeightPx) < 1f
     }
 }
 
