@@ -5,13 +5,18 @@ import com.shmakov.udf.composable.content.AccountDetailsScreenContent
 import com.shmakov.udf.navigation.*
 
 class AccountDetailsScreen(
-    override val destination: AccountDetails
-) : Screen(destination) {
+    override val entry: BackStackEntry,
+) : Screen(entry) {
 
     @Composable
-    override fun Content(nestedNavState: NavState) {
+    override fun Content(
+        nestedEntries: List<BackStackEntry>,
+        lastNavActionType: NavActionType,
+    ) {
+        val route = entry.route as AccountDetails
+
         AccountDetailsScreenContent(
-            id = destination.accountId,
+            id = route.accountId,
         )
     }
 }

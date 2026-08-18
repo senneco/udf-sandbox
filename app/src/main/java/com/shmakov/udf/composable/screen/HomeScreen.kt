@@ -4,33 +4,40 @@ import android.content.res.Configuration
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalConfiguration
 import com.shmakov.udf.composable.content.HomeScreenContent
-import com.shmakov.udf.navigation.Destination
-import com.shmakov.udf.navigation.Home
-import com.shmakov.udf.navigation.NavState
+import com.shmakov.udf.navigation.BackStackEntry
+import com.shmakov.udf.navigation.NavActionType
+import com.shmakov.udf.navigation.RenderSlot
 import com.shmakov.udf.navigation.Screen
 
 class HomeScreen(
-    override val destination: Home
-) : Screen(destination) {
+    override val entry: BackStackEntry,
+) : Screen(entry) {
 
     @Composable
     override fun whereToShowChild(
-        whereShowCurrentDestination: Destination,
-        childDestination: Destination
-    ): Destination {
+        currentSlot: RenderSlot,
+        childEntry: BackStackEntry,
+    ): RenderSlot {
         val configuration = LocalConfiguration.current
 
         val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
         return if (isLandscape) {
-            destination
+            RenderSlot.Nested(entry.id)
         } else {
-            whereShowCurrentDestination
+            currentSlot
         }
     }
 
     @Composable
-    override fun Content(nestedNavState: NavState) {
-        HomeScreenContent(destination, nestedNavState)
+    override fun Content(
+        nestedEntries: List<BackStackEntry>,
+        lastNavActionType: NavActionType,
+    ) {
+        HomeScreenContent(
+            currentEntry = entry,
+            nestedEntries = nestedEntries,
+            lastNavActionType = lastNavActionType,
+        )
     }
 }

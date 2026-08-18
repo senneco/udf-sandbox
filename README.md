@@ -23,7 +23,7 @@ Navigation as state имеет смысл, только если модель н
 
 ## Основная идея
 
-Текущий прототип хранит линейный `NavState.backStack`, содержащий и content-, и modal-destinations. `AnimatedNavigation` проецирует эту логическую историю в один или несколько UI-слотов.
+Текущий прототип хранит линейный `NavState.entries`. Каждый `BackStackEntry` содержит стабильный `EntryId` и semantic `Route`, поэтому два появления одного route остаются независимыми. Content- и modal-routes участвуют в одной истории, а `AnimatedNavigation` проецирует её в один или несколько UI-слотов.
 
 Например, один и тот же state рендерится по-разному без изменения navigation history:
 
@@ -46,25 +46,42 @@ flowchart LR
     UI -->|"анимация завершена"| Action
 ```
 
-Текущий код уже реализует направление `state -> UI`, но callbacks из UI пока напрямую изменяют глобальный `appState`. Следующий архитектурный шаг — ввести actions, reducer, стабильные back-stack entries и lifecycle-aware store.
+Текущий код уже реализует направление `state -> UI`, валидируемую entry model и сохраняемое primitive-представление истории. Callbacks из UI пока напрямую изменяют глобальный `appState`. Следующий архитектурный шаг — ввести typed actions и чистый reducer, а затем lifecycle-aware store и чистую layout projection.
 
 ## Текущее состояние
 
 Прототип уже демонстрирует:
 
 - back stack, хранящийся в state;
+- semantic routes и независимую identity каждого back-stack entry;
+- непустой stack с content-root и уникальными entry IDs;
+- versioned snapshot и расширяемый route codec без Android/Compose dependencies;
 - push, pop и замену текущей ветки;
 - content и modal destinations в одной логической истории;
 - вложенный рендеринг в landscape;
 - анимированные переходы между content;
 - синхронизацию закрытия bottom sheet обратно в navigation state.
 
-Известные ограничения: распределённые мутации state, незафиксированные инварианты стека, неполная регистрация destinations, хрупкий modal bookkeeping, отсутствие восстановления после process death и поведенческих тестов. Подробный baseline, ограничения и целевая архитектура описаны в [контексте проекта](docs/PROJECT_CONTEXT.md).
+Известные ограничения: распределённые мутации state, неполная регистрация routes, хрупкий modal bookkeeping, отсутствие подключения snapshot к process-death restoration и отсутствие reducer-, projection- и UI-тестов. Подробный baseline, ограничения и целевая архитектура описаны в [контексте проекта](docs/PROJECT_CONTEXT.md).
+
+Базовая модель намеренно читается без framework-specific терминов:
+
+```kotlin
+val state = NavState.history(
+    root = Home,
+    Accounts,
+    Account(accountId = 42),
+)
+
+val snapshot = state.toSnapshot(DemoRouteCodec)
+```
+
+Обычный код отдаёт генерацию identity фабрикам, а restoration и deep links могут передать заранее известные IDs через `NavState.fromEntries(...)`. Пользовательские routes реализуют ровно один из открытых интерфейсов `ContentRoute` или `ModalRoute` и подключают собственный `RouteCodec`.
 
 ## Карта кода
 
 - [`AppState.kt`](app/src/main/java/com/shmakov/udf/AppState.kt) и [`UdfApp.kt`](app/src/main/java/com/shmakov/udf/UdfApp.kt) — текущий глобальный владелец state и начальное demo-состояние.
-- [`navigation/`](app/src/main/java/com/shmakov/udf/navigation) — destinations, navigation state и screen abstractions.
+- [`navigation/`](app/src/main/java/com/shmakov/udf/navigation) — routes, back-stack entries, валидируемый navigation state, snapshot/codec и screen abstractions.
 - [`AnimatedNavigation.kt`](app/src/main/java/com/shmakov/udf/composable/common/AnimatedNavigation.kt) — проекция стека, вложенный рендеринг, content transitions и modal bookkeeping.
 - [`BottomSheetLayout.kt`](app/src/main/java/com/shmakov/udf/composable/common/BottomSheetLayout.kt) — временное animation state bottom sheet.
 - [`composable/screen/`](app/src/main/java/com/shmakov/udf/composable/screen) — адаптеры экранов и правила размещения дочернего content.

@@ -3,17 +3,26 @@ package com.shmakov.udf.navigation
 import androidx.compose.runtime.Composable
 
 abstract class Screen(
-    open val destination: Destination,
+    open val entry: BackStackEntry,
 ) {
 
     @Composable
-    open fun whereToShowChild(
-        whereShowCurrentDestination: Destination,
-        childDestination: Destination,
-    ): Destination {
-        return AppRoot
+    internal open fun whereToShowChild(
+        currentSlot: RenderSlot,
+        childEntry: BackStackEntry,
+    ): RenderSlot {
+        return RenderSlot.Root
     }
 
     @Composable
-    abstract fun Content(nestedNavState: NavState)
+    abstract fun Content(
+        nestedEntries: List<BackStackEntry>,
+        lastNavActionType: NavActionType,
+    )
+}
+
+internal sealed interface RenderSlot {
+    object Root : RenderSlot
+
+    data class Nested(val entryId: EntryId) : RenderSlot
 }

@@ -12,7 +12,8 @@ import androidx.compose.ui.Modifier
 import com.shmakov.udf.UdfApp.Companion.appState
 import com.shmakov.udf.composable.common.AnimatedNavigation
 import com.shmakov.udf.navigation.NavActionType
-import com.shmakov.udf.navigation.AppRoot
+import com.shmakov.udf.navigation.NavState
+import com.shmakov.udf.navigation.requireValid
 import com.shmakov.udf.ui.theme.UDFTheme
 
 class MainActivity : ComponentActivity() {
@@ -22,13 +23,18 @@ class MainActivity : ComponentActivity() {
 
         setContent {
 
-            BackHandler(enabled = appState.navState.backStack.size > 1) {
-                appState = appState.copy(
-                    navState = appState.navState.copy(
-                        backStack = appState.navState.backStack.dropLast(1),
+            BackHandler(enabled = appState.navState.entries.size > 1) {
+                val currentState = appState
+                val currentEntries = currentState.navState.entries
+
+                if (currentEntries.size > 1) {
+                    appState = currentState.copy(
+                        navState = NavState.fromEntries(
+                            currentEntries.dropLast(1),
+                        ).requireValid(),
                         lastNavActionType = NavActionType.Pop,
                     )
-                )
+                }
             }
 
 
@@ -46,6 +52,9 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun AppContent(appState: AppState) {
-        AnimatedNavigation(appState.navState, AppRoot)
+        AnimatedNavigation(
+            navState = appState.navState,
+            lastNavActionType = appState.lastNavActionType,
+        )
     }
 }

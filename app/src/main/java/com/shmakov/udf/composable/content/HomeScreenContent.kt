@@ -17,8 +17,9 @@ import com.shmakov.udf.navigation.*
 
 @Composable
 fun HomeScreenContent(
-    currentDestination: Destination,
-    nestedNavState: NavState,
+    currentEntry: BackStackEntry,
+    nestedEntries: List<BackStackEntry>,
+    lastNavActionType: NavActionType,
 ) {
     Column(
         modifier = Modifier
@@ -33,56 +34,65 @@ fun HomeScreenContent(
 
         if (isLandscape) {
             Row {
-                Buttons(currentDestination = currentDestination)
+                Buttons(currentEntry = currentEntry)
             }
         } else {
             Column {
-                Buttons(currentDestination = currentDestination)
+                Buttons(currentEntry = currentEntry)
             }
         }
 
-        if (nestedNavState.backStack.isNotEmpty()) {
-            AnimatedNavigation(navState = nestedNavState, into = currentDestination)
+        if (nestedEntries.isNotEmpty()) {
+            AnimatedNavigation(
+                entries = nestedEntries,
+                into = RenderSlot.Nested(currentEntry.id),
+                lastNavActionType = lastNavActionType,
+            )
         }
     }
 }
 
 @Composable
 fun Buttons(
-    currentDestination: Destination,
+    currentEntry: BackStackEntry,
 ) {
-    Button(onClick = { navigateTo(currentDestination, Accounts) }) {
+    Button(onClick = { navigateTo(currentEntry, Accounts) }) {
         Text(text = "Go to Accounts")
     }
 
     Button(
-        onClick = { navigateTo(currentDestination, Transactions) },
+        onClick = { navigateTo(currentEntry, Transactions) },
     ) {
         Text(text = "Go to Transactions")
     }
 
-    Button(onClick = { navigateTo(currentDestination, Cards) }) {
+    Button(onClick = { navigateTo(currentEntry, Cards) }) {
         Text(text = "Go to Cards")
     }
 }
 
 // TODO: move to reducer
 private fun navigateTo(
-    currentDestination: Destination,
-    targetDestination: Destination,
+    currentEntry: BackStackEntry,
+    targetRoute: ContentRoute,
 ) {
-    val currentDestinationIndex = appState.navState.backStack.indexOf(currentDestination)
+    val currentEntryIndex = appState.navState.entries.indexOfFirst {
+        it.id == currentEntry.id
+    }
 
-    val navActionType = if (currentDestinationIndex == appState.navState.backStack.lastIndex) {
+    if (currentEntryIndex == -1) return
+
+    val navActionType = if (currentEntryIndex == appState.navState.entries.lastIndex) {
         NavActionType.Push
     } else {
         NavActionType.Replace
     }
 
     appState = appState.copy(
-        navState = appState.navState.copy(
-            backStack = appState.navState.backStack.take(currentDestinationIndex + 1) + targetDestination,
-            lastNavActionType = navActionType,
-        )
+        navState = NavState.fromEntries(
+            appState.navState.entries.take(currentEntryIndex + 1) +
+                BackStackEntry.create(targetRoute),
+        ).requireValid(),
+        lastNavActionType = navActionType,
     )
 }

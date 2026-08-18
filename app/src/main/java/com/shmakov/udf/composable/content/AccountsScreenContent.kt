@@ -10,7 +10,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.shmakov.udf.UdfApp.Companion.appState
 import com.shmakov.udf.navigation.Account
+import com.shmakov.udf.navigation.BackStackEntry
 import com.shmakov.udf.navigation.NavActionType
+import com.shmakov.udf.navigation.NavState
+import com.shmakov.udf.navigation.requireValid
 
 @Composable
 fun AccountsScreenContent() {
@@ -33,9 +36,9 @@ fun AccountsScreenContent() {
 
 private fun navigateTo(id: Int) {
     appState = appState.copy(
-        navState = appState.navState.copy(
-            backStack = appState.navState.backStack + Account(accountId = id),
-            lastNavActionType = NavActionType.Push,
-        )
+        navState = NavState.fromEntries(
+            appState.navState.entries + BackStackEntry.create(Account(accountId = id)),
+        ).requireValid(),
+        lastNavActionType = NavActionType.Push,
     )
 }
