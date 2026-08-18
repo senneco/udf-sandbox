@@ -31,9 +31,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val frame by appViewModel.frames.collectAsStateWithLifecycle()
+            val backAction = AppBackActionPlanner.action(frame.appState.navState)
 
-            BackHandler(enabled = frame.appState.navState.entries.size > 1) {
-                appViewModel.dispatch(NavAction.Pop)
+            BackHandler(enabled = backAction != null) {
+                backAction?.let(appViewModel::dispatch)
             }
 
             UDFTheme {

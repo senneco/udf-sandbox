@@ -5,14 +5,16 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetScaffoldState
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -20,12 +22,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import com.shmakov.udf.navigation.ModalScreenState
+import kotlinx.coroutines.flow.first
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,79 +43,146 @@ fun BottomSheetLayout(
     onExitFinished: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val currentTargetState by rememberUpdatedState(targetState)
-    val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
-    val currentOnExitFinished by rememberUpdatedState(onExitFinished)
-    // Every accepted Shown -> Hidden lifecycle gets its own exactly-once completion guard.
-    var exitCompletionReported by remember(targetState) { mutableStateOf(false) }
+    val phase = remember(targetState) {
+        when (targetState) {
+            ModalScreenState.Shown -> BottomSheetPhase.Desired(onDismissRequest)
+            ModalScreenState.Hidden -> BottomSheetPhase.Exiting(onExitFinished)
+        }
+    }
+    val currentPhase by rememberUpdatedState(phase)
 
-    val bottomSheetState = rememberModalBottomSheetState(
-        skipPartiallyExpanded = true,
-        confirmValueChange = { nextValue ->
-            if (
-                nextValue == SheetValue.Hidden &&
-                currentTargetState == ModalScreenState.Shown
-            ) {
-                currentOnDismissRequest()
-                false
-            } else {
-                true
-            }
-        },
+    // BottomSheetScaffold is a standard (collapsed/expanded) sheet. Pairing it with a modal
+    // Hidden/Expanded SheetState breaks its anchor-change and accessibility semantics.
+    val bottomSheetState = rememberStandardBottomSheetState(
+        initialValue = SheetValue.PartiallyExpanded,
+        confirmValueChange = { true },
+        skipHiddenState = true,
     )
-
-    val requestDismiss: () -> Unit = {
-        if (currentTargetState == ModalScreenState.Shown) {
-            currentOnDismissRequest()
-        }
-    }
-    val finishExitOnce: () -> Unit = {
-        if (!exitCompletionReported) {
-            exitCompletionReported = true
-            currentOnExitFinished()
-        }
-    }
 
     val scaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = bottomSheetState,
     )
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    var sheetContentSize by remember { mutableStateOf(IntSize.Zero) }
 
-    // A durable Hidden target can arrive while the sheet is already invisible (for example during
-    // a rapid Shown -> Hidden cycle). Complete that exit after composition instead of leaving an
-    // invisible modal layer mounted over the destination below it.
-    if (targetState == ModalScreenState.Hidden && !bottomSheetState.isVisible) {
-        LaunchedEffect(targetState, bottomSheetState) {
-            finishExitOnce()
+    val requestDismiss: () -> Unit = remember(phase) {
+        {
+            if (phase is BottomSheetPhase.Desired) {
+                phase.requestDismiss(currentPhase)
+            }
         }
-        return
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .onSizeChanged { containerSize = it },
+    ) {
         BottomSheetScaffold(
-            sheetContent = content,
+            sheetContent = {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { sheetContentSize = it },
+                ) {
+                    content()
+                }
+            },
             scaffoldState = scaffoldState,
+            sheetPeekHeight = 0.dp,
+            sheetSwipeEnabled = phase is BottomSheetPhase.Desired,
             containerColor = Color.Unspecified,
         ) {
             Scrim(
                 color = BottomSheetDefaults.ScrimColor,
                 onDismissRequest = requestDismiss,
-                visible = bottomSheetState.targetValue != SheetValue.Hidden,
+                visible = bottomSheetState.currentValue != SheetValue.PartiallyExpanded ||
+                    bottomSheetState.targetValue != SheetValue.PartiallyExpanded,
             )
         }
 
-        LaunchedEffect(targetState, bottomSheetState) {
-            when (targetState) {
-                ModalScreenState.Shown -> {
-                    bottomSheetState.show()
+        LaunchedEffect(phase, bottomSheetState, containerSize, sheetContentSize) {
+            suspend fun converge(target: BottomSheetMotionTarget) {
+                convergeBottomSheet(
+                    target = target,
+                    snapshot = {
+                        BottomSheetMotionSnapshot(
+                            current = bottomSheetState.currentValue.toMotionTarget(),
+                            target = bottomSheetState.targetValue.toMotionTarget(),
+                        )
+                    },
+                    move = { requestedTarget ->
+                        when (requestedTarget) {
+                            BottomSheetMotionTarget.Expanded -> bottomSheetState.expand()
+                            BottomSheetMotionTarget.Collapsed -> bottomSheetState.partialExpand()
+                        }
+                    },
+                    awaitRetry = { withFrameNanos { } },
+                )
+            }
+
+            when (val effectPhase = phase) {
+                is BottomSheetPhase.Desired -> {
+                    // The pinned Material version can retain an old Expanded offset after sheet
+                    // geometry changes while keeping the semantic value Expanded. Moving through
+                    // the collapsed anchor makes the next expansion resolve the new exact offset;
+                    // gesture observation is deliberately not armed during this recovery.
+                    converge(BottomSheetMotionTarget.Collapsed)
+
+                    while (currentPhase === effectPhase) {
+                        // A zero-height sheet or a resize can temporarily remove Expanded. Such
+                        // anchor churn is recovery work, never a user dismiss request.
+                        // Semantic anchor/value observation cannot reveal a stale physical offset
+                        // when geometry changes. Geometry keys restart recovery, while frame
+                        // polling bridges the interval between measurement and anchor installation.
+                        while (!bottomSheetState.hasExpandedState) {
+                            withFrameNanos { }
+                        }
+                        converge(BottomSheetMotionTarget.Expanded)
+                        if (currentPhase !== effectPhase) return@LaunchedEffect
+
+                        val observation = snapshotFlow {
+                            BottomSheetObservation(
+                                hasExpandedAnchor = bottomSheetState.hasExpandedState,
+                                target = bottomSheetState.targetValue.toMotionTarget(),
+                            )
+                        }.first { observation ->
+                            !observation.hasExpandedAnchor ||
+                                observation.target == BottomSheetMotionTarget.Collapsed
+                        }
+
+                        if (!observation.hasExpandedAnchor) {
+                            continue
+                        }
+
+                        effectPhase.requestDismiss(currentPhase)
+
+                        // Give a synchronous durable acknowledgement one apply turn before an
+                        // unacknowledged gesture is corrected back to Expanded.
+                        withFrameNanos { }
+                    }
                 }
 
-                ModalScreenState.Hidden -> {
-                    bottomSheetState.hide()
-                    finishExitOnce()
+                is BottomSheetPhase.Exiting -> {
+                    converge(BottomSheetMotionTarget.Collapsed)
+                    effectPhase.completeExit(currentPhase)
                 }
             }
         }
     }
+}
+
+private data class BottomSheetObservation(
+    val hasExpandedAnchor: Boolean,
+    val target: BottomSheetMotionTarget,
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+private fun SheetValue.toMotionTarget(): BottomSheetMotionTarget = when (this) {
+    SheetValue.Expanded -> BottomSheetMotionTarget.Expanded
+    SheetValue.PartiallyExpanded,
+    SheetValue.Hidden,
+    -> BottomSheetMotionTarget.Collapsed
 }
 
 @Composable
