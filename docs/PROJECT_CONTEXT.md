@@ -112,6 +112,7 @@ Route отвечает на вопрос «куда», entry — «какое и
 - bottom-sheet request, durable dismiss, physical convergence и exit completion можно разделить без передачи Material state во владение reducer-у;
 - validated navigation snapshot можно хранить в `SavedStateHandle` как одно Bundle-safe primitive значение и восстанавливать с теми же entry IDs;
 - transient revision, transition intent и presentation progress можно сбрасывать при новом owner-е, не переигрывая старый navigation transition.
+- account deep link можно чисто нормализовать в полную history `Home -> Accounts -> Account(id) -> AccountDetails(id)` и применить одним `ReplaceHistory` через общий state owner;
 
 Reducer contract покрывает эталонные state transitions и подключён к lifecycle-aware owner. Store и persistence contracts доказывают атомарные frames, revisions, stale callbacks, независимых owners, сериализацию concurrent actions, primitive envelope, fallback/rewrite и simulated process restoration через новый `SavedStateHandle`. Projection contracts отдельно доказывают single-/expanded размещение, modal ownership, content после modal, Back reprojection, immutable collections, typed policy failures и Java API. Presentation contracts доказывают exact Push/Pop/Replace matching, suppression stale/layout/renderer-recreation motion, entry-ID identity, независимость outgoing/target trees и exhaustive destination binding. Bottom-sheet contracts отдельно покрывают phase identity, internal cancellation retry, geometry/anchor churn, repeated dismiss sources и exact modal Back. Android instrumentation boundary поверх тех же contracts проверяет реальный `Bundle`/`Parcel` round trip, fresh owner, Activity recreation и отсутствие восстановления renderer-retained modal state.
 
@@ -279,6 +280,8 @@ Route, entry identity, validated `NavState`, primitive snapshot, `SavedStateHand
 - Не сохранять animation progress в navigation state.
 - Не сохранять `NavTransitionIntent` в navigation state или snapshot; `Unchanged` не создаёт transition.
 - Logout и deep link заменяют полную валидную history атомарным `ReplaceHistory`.
+- Demo URI `udf-sandbox://accounts/{positiveInt}/details` использует framework-free parsing, typed normalization и свежие entry IDs; hydration заканчивается тем же `NavState.fromEntries`, что лежит в основе restoration validation.
+- Cold и warm deep links проходят через один `AppViewModel` boundary; Activity recreation не переигрывает исходный launch intent.
 - AndroidX Navigation допустим как implementation detail, если application state остаётся каноническим.
 - Каждая behavior-changing issue определяет наблюдаемые acceptance criteria и сфокусированные тесты.
 - GitHub Issues — единственный live task tracker; документация описывает фазы и решения, но не дублирует статус.
@@ -289,7 +292,6 @@ Route, entry identity, validated `NavState`, primitive snapshot, `SavedStateHand
 
 - Должна ли каноническая навигация остаться линейной историей или стать явным деревом?
 - Как превратить внутреннее exact-intent matching в простой application-defined animation policy API?
-- Как normalise deep link в валидную navigation history?
 - Как обобщить stateful tab graph с независимыми histories, не усложнив линейный базовый API?
 - Как predictive Back интегрируется с reducer-owned navigation state?
 - Может ли Navigation Compose помочь с платформенной интеграцией, не становясь владельцем канонической истории?

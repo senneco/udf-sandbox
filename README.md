@@ -203,7 +203,7 @@ Bottom-sheet bridge считает presentation state единственным �
 
 Renderer передаёт каждому content-screen явный `childContent`. Screen, который может стать владельцем `ChildOf(...)`, обязан вызвать эту lambda ровно в нужном месте; текущая demo policy создаёт child только у `Home`, а leaf screens её не вызывают. Этот договор и разрыв между публичными `Screen`/`ModalScreen` и internal catalog/renderer остаются незавершённой demo boundary, а не рекомендуемым consumer API.
 
-Scoped device gate и два landscape-кадра для regression #13 сохранены в [evidence issue #13](docs/evidence/issue-13/README.md). Gate retained-modal lifecycle и owner placement находятся в [evidence issue #14](docs/evidence/issue-14/README.md). Cancellation-safe bottom-sheet convergence, exact modal Back, реальный swipe и финальные кадры собраны в [evidence issue #15](docs/evidence/issue-15/README.md). Recreation, primitive `Bundle`/`Parcel` restoration и modal `Snap` bootstrap зафиксированы в [evidence issue #16](docs/evidence/issue-16/README.md). Exact-entry `rememberSaveable`, relocation, cleanup и Activity recreation покрыты в [evidence issue #17](docs/evidence/issue-17/README.md).
+Scoped device gate и два landscape-кадра для regression #13 сохранены в [evidence issue #13](docs/evidence/issue-13/README.md). Gate retained-modal lifecycle и owner placement находятся в [evidence issue #14](docs/evidence/issue-14/README.md). Cancellation-safe bottom-sheet convergence, exact modal Back, реальный swipe и финальные кадры собраны в [evidence issue #15](docs/evidence/issue-15/README.md). Recreation, primitive `Bundle`/`Parcel` restoration и modal `Snap` bootstrap зафиксированы в [evidence issue #16](docs/evidence/issue-16/README.md). Exact-entry `rememberSaveable`, relocation, cleanup и Activity recreation покрыты в [evidence issue #17](docs/evidence/issue-17/README.md). Полная account deep-link hydration, cold/warm Android delivery и Back history собраны в [evidence issue #18](docs/evidence/issue-18/README.md).
 
 ## Переходы состояния
 
@@ -255,6 +255,39 @@ val deepLink = NavReducer.reduce(
 `NavigateFrom` работает как guarded push, когда source уже является top, и как branch replacement, когда после source есть descendants. Отсутствующий или устаревший ID, повторный dismiss и попытка удалить root возвращают тот же `NavState` внутри `NavReduction.Unchanged`; reducer не перенаправляет action на «похожий» route.
 
 `ReplaceHistory` может сохранить старый entry ID только вместе с тем же semantic route. Для новых logout- или deep-link-occurrences используйте свежие IDs; попытка связать прежний ID с другим route возвращает typed `Unchanged`.
+
+## Deep link как полное navigation state
+
+Demo host поддерживает один намеренно узкий URI-контракт:
+
+```text
+udf-sandbox://accounts/{positiveInt}/details
+```
+
+Например, `udf-sandbox://accounts/42/details` атомарно создаёт логическую history:
+
+```text
+Home -> Accounts -> Account(42) -> AccountDetails(42)
+```
+
+Это не shortcut к leaf-экрану. В single- и expanded-layout исходная projection показывает `AccountDetails(42)` в root. Первый Back удаляет details и снова проецирует `Home -> Accounts -> Account(42)`: в portrait это `Accounts` с account sheet, в landscape — `Home`, вложенный `Accounts` и тот же sheet. Следующий Back отправляет exact-ID `DismissModal`, затем `Pop` возвращает `Home`.
+
+Pipeline разделён по ответственности:
+
+```text
+raw URI
+  -> framework-free syntax parser
+  -> demo normalization + typed target
+  -> validated four-entry NavState with fresh IDs
+  -> one ReplaceHistory through AppViewModel/AppStore
+  -> projection + renderer
+```
+
+Scheme и host обязаны быть lowercase, как и в Android intent filter; ведущие нули ID удаляются в canonical URI. ID обязан быть ASCII decimal в диапазоне `1..Int.MAX_VALUE`. Query, fragment, port, user info, trailing slash, percent-encoded ID и дополнительные path segments отклоняются типизированно. Другой scheme, host или регистр считается `NotHandled`. Ни один такой результат не изменяет текущий или сохранённый state.
+
+Hydration заканчивается обычным `NavState.fromEntries`, то есть проходит тот же structural validator, что snapshot restoration. Каждый новый deep-link event материализует свежие entry IDs, чтобы state предыдущего появления route не перетёк в новое.
+
+Cold `ACTION_VIEW` и warm `onNewIntent` вызывают один `AppViewModel.handleDeepLink`. Activity имеет `singleTop`; warm intent обновляет `activity.intent`, а cold intent обрабатывается до первой composition. При Activity recreation исходный launch intent не применяется повторно: восстановленные IDs и уже выполненный Back progress остаются каноническими.
 
 `NavTransitionIntent` существует только в `NavReduction.Changed`. Это описание совершившегося перехода для будущего renderer/animation policy, а не часть долгоживущего state:
 
@@ -310,6 +343,7 @@ Pure JVM contracts проверяют wire format, validation/fallback, save-bef
 - [`AppState.kt`](app/src/main/java/com/shmakov/udf/AppState.kt), [`AppStore.kt`](app/src/main/java/com/shmakov/udf/AppStore.kt) и [`AppViewModel.kt`](app/src/main/java/com/shmakov/udf/AppViewModel.kt) — immutable application state, persist-before-frame store и Activity-scoped lifecycle owner.
 - [`NavigationSnapshotEnvelope.kt`](app/src/main/java/com/shmakov/udf/NavigationSnapshotEnvelope.kt) и [`SavedNavigationStateStore.kt`](app/src/main/java/com/shmakov/udf/SavedNavigationStateStore.kt) — one-key Bundle-safe wire format и typed `SavedStateHandle` restoration boundary.
 - [`UdfApp.kt`](app/src/main/java/com/shmakov/udf/UdfApp.kt) — только application initialization и logging; navigation state там не хранится.
+- [`deeplink/`](app/src/main/java/com/shmakov/udf/deeplink) — framework-free URI parsing, demo normalization и validated hydration полной history.
 - [`navigation/`](app/src/main/java/com/shmakov/udf/navigation) — routes, back-stack entries, валидируемый navigation state, actions/reducer, snapshot/codec и screen abstractions.
 - [`NavigationProjection.kt`](app/src/main/java/com/shmakov/udf/navigation/NavigationProjection.kt) — pure Kotlin layout policy, immutable render tree и typed projection results.
 - [`NavigationPresentation.kt`](app/src/main/java/com/shmakov/udf/NavigationPresentation.kt) — renderer-target, exact-intent validation и выбор content motion.
