@@ -4,13 +4,67 @@ import com.shmakov.udf.navigation.ContentSlot
 import com.shmakov.udf.navigation.EntryId
 import com.shmakov.udf.navigation.NavTransitionIntent
 import com.shmakov.udf.navigation.NavigationRenderTree
+import java.util.Collections
 
 /** One atomic projection revision supplied to the Compose renderer. */
-internal data class NavigationRenderTarget(
+internal class NavigationRenderTarget(
     val navigationRevision: Long,
+    historyEntryIds: List<EntryId>,
     val tree: NavigationRenderTree,
     val transitionIntent: NavTransitionIntent?,
-)
+) {
+    val historyEntryIds: List<EntryId> =
+        Collections.unmodifiableList(ArrayList(historyEntryIds))
+
+    init {
+        require(this.historyEntryIds.isNotEmpty()) {
+            "historyEntryIds must not be empty"
+        }
+
+        val seenEntryIds = mutableSetOf<EntryId>()
+        this.historyEntryIds.forEachIndexed { index, entryId ->
+            require(entryId.value.isNotBlank()) {
+                "historyEntryIds[$index] must not be blank"
+            }
+            require(seenEntryIds.add(entryId)) {
+                "historyEntryIds contains duplicate entry ID '${entryId.value}'"
+            }
+        }
+
+        val historyEntryIdSet = seenEntryIds
+        val seenVisibleEntryIds = mutableSetOf<EntryId>()
+        tree.orderedVisibleEntryIds().forEachIndexed { index, visibleEntryId ->
+            require(visibleEntryId in historyEntryIdSet) {
+                "Visible tree entry ID '${visibleEntryId.value}' is missing from historyEntryIds"
+            }
+            require(seenVisibleEntryIds.add(visibleEntryId)) {
+                "Visible tree contains duplicate entry ID '${visibleEntryId.value}' " +
+                    "at ordered index $index"
+            }
+        }
+    }
+
+    override fun equals(other: Any?): Boolean =
+        this === other ||
+            other is NavigationRenderTarget &&
+            navigationRevision == other.navigationRevision &&
+            historyEntryIds == other.historyEntryIds &&
+            tree == other.tree &&
+            transitionIntent == other.transitionIntent
+
+    override fun hashCode(): Int {
+        var result = navigationRevision.hashCode()
+        result = 31 * result + historyEntryIds.hashCode()
+        result = 31 * result + tree.hashCode()
+        result = 31 * result + (transitionIntent?.hashCode() ?: 0)
+        return result
+    }
+
+    override fun toString(): String =
+        "NavigationRenderTarget(navigationRevision=$navigationRevision, " +
+            "historyEntryIds=$historyEntryIds, tree=$tree, " +
+            "transitionIntent=$transitionIntent)"
+}
 
 /** Content motion selected only for a validated, contiguous navigation change. */
 internal enum class NavigationContentMotion {

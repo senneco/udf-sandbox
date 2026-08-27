@@ -457,8 +457,10 @@ class NavigationPresentationPlannerContractTest {
         revision: Long,
         tree: NavigationRenderTree,
         transition: NavTransitionIntent?,
+        historyEntryIds: List<EntryId> = tree.visibleEntryIds(),
     ): NavigationRenderTarget = NavigationRenderTarget(
         navigationRevision = revision,
+        historyEntryIds = historyEntryIds,
         tree = tree,
         transitionIntent = transition,
     )
@@ -483,6 +485,12 @@ class NavigationPresentationPlannerContractTest {
     private fun NavigationRenderTree.visibleContentEntries(): List<BackStackEntry> = buildList {
         add(root.entry)
         nestedSlots.forEach { slot -> add(slot.entry) }
+    }
+
+    private fun NavigationRenderTree.visibleEntryIds(): List<EntryId> = buildList {
+        add(root.entry.id)
+        nestedSlots.forEach { slot -> add(slot.entry.id) }
+        modalLayers.forEach { layer -> add(layer.entry.id) }
     }
 
     private companion object {

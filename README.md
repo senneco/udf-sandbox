@@ -47,7 +47,7 @@ flowchart LR
     UI -->|"анимация завершена"| Action
 ```
 
-Navigation core уже содержит валидируемую entry model, сохраняемое primitive-представление истории, typed `NavAction`, чистый `NavReducer` и чистую stack-to-layout projection. Activity-scoped `AppViewModel` владеет demo-specific `AppStore`, публикует immutable frames через read-only `StateFlow` и сериализует actions перед reducer. Compose наблюдает flow с учётом lifecycle, проецирует текущий state и передаёт renderer-у атомарный target. Renderer использует отдельную чистую модель retained modal entries, а state-authoritative Material bridge разделяет пользовательский dismiss request и presentation completion.
+Navigation core уже содержит валидируемую entry model, сохраняемое primitive-представление истории, typed `NavAction`, чистый `NavReducer` и чистую stack-to-layout projection. Activity-scoped `AppViewModel` владеет demo-specific `AppStore`, публикует immutable frames через read-only `StateFlow` и сериализует actions перед reducer. Compose наблюдает flow с учётом lifecycle, проецирует текущий state и передаёт renderer-у атомарный target с полным ordered membership той же history. Renderer автоматически привязывает saveable UI state к exact entry occurrence, использует отдельную чистую модель retained modal entries, а state-authoritative Material bridge разделяет пользовательский dismiss request и presentation completion.
 
 ## Текущее состояние
 
@@ -64,7 +64,9 @@ Navigation core уже содержит валидируемую entry model, с
 - lifecycle-aware Compose collection и явные callbacks без глобальных state imports в UI;
 - чистую stack-to-layout projection с явной application-owned layout policy;
 - immutable root-, nested- и modal-слоты с exact-ID ownership modal layers;
+- атомарный renderer target с defensive unmodifiable списком всех entry IDs в порядке history;
 - Compose-rendering outgoing и incoming ветвей из их собственных immutable trees;
+- entry-scoped `rememberSaveable` для content и modal destinations, включая скрытые history entries и перемещение между layout slots;
 - process-local revision, которая отличает новый navigation transition от layout reprojection;
 - восстановление navigation history из `SavedStateHandle` через один Bundle-safe
   `ArrayList<String>` envelope с сохранением точных entry IDs;
@@ -138,15 +140,18 @@ Demo host связывает state, layout и presentation в одном нап�
 ```mermaid
 flowchart LR
     Frame["AppStateFrame(state, revision, intent)"] --> Projector["NavProjector"]
+    Frame -->|"ordered historyEntryIds"| Target["NavigationRenderTarget(navigationRevision, historyEntryIds, tree, transitionIntent)"]
     Window["Window configuration"] --> Policy["Layout policy"]
     Policy --> Projector
     Projector --> Tree["NavigationRenderTree"]
-    Tree --> Target["NavigationRenderTarget"]
+    Tree --> Target
     Target --> Renderer["AnimatedNavigation"]
     Renderer --> Binder["DestinationTreeBinder"]
     Binder --> Branches["Bound outgoing / target branches"]
     Branches --> ModalPlanner["Retained modal planner"]
 ```
+
+`NavigationRenderTarget` атомарно объединяет projection, transition metadata и ordered `historyEntryIds` из того же `NavState`. Список является defensive runtime-unmodifiable copy; target отклоняет empty, blank или duplicate IDs и видимый tree entry, которого нет в history. Полный membership нужен renderer-у, потому что single-pane projection может не показывать сохранённые entries.
 
 `navigationRevision` увеличивается только для `NavReduction.Changed`. Она не сериализуется и не хранит animation progress. Renderer-local accepted-target holder живёт в течение lifetime текущей composition и сохраняет последний успешно принятый target только для классификации следующего update. Отдельно Compose transition удерживает outgoing `BoundRenderState` лишь пока выполняется активная exit-анимация. Ни один из этих объектов не попадает в store, `NavState` или snapshot.
 
@@ -163,7 +168,34 @@ Motion выбирается с явной precedence: planner сначала т�
 
 Каждая lambda `AnimatedContent` рендерит только переданный ей `branchState.tree`. Поэтому при переходе из expanded `Home -> Accounts -> Account(1)` в `AccountDetails(1)` outgoing-ветка сохраняет собственные `Home`, nested `Accounts` и sheet до конца exit, а incoming-ветка независимо рендерит details. Root и nested content используют точный `BackStackEntry.id` как Compose identity.
 
-Каждая root-ветка также владеет собственным process-local `ModalPresentationState`. При contiguous navigation revision пропавший modal немедленно исчезает из durable `NavState`, но остаётся в renderer-е как `Exiting(entryId, generation)` до завершения именно своей анимации. Пакетные add/remove не теряют соседние layers, одинаковые routes различаются по entry ID, reorder безопасно snap-ится к текущему desired order, а callback со старым generation становится no-op. Candidate presentation вычисляется чисто во время composition и принимается только в `SideEffect`; каждый layer рендерится в geometry exact `ownerContentEntryId`, а disposal исчезнувшей owner-ветки освобождает только захваченный exit token. `onDismissRequest` отправляет exact-ID action reducer-у, тогда как `onExitFinished` меняет только renderer-local presentation.
+### UI state конкретного entry
+
+Consumer пишет обычный `rememberSaveable` внутри `Screen` или `ModalScreen`; вручную передавать ID в saveable key не нужно:
+
+```kotlin
+class SearchScreen(
+    override val entry: BackStackEntry,
+) : Screen(entry) {
+    @Composable
+    override fun Content(
+        childContent: @Composable () -> Unit,
+        onNavigationAction: (NavAction) -> Unit,
+    ) {
+        var query by rememberSaveable { mutableStateOf("") }
+        SearchContent(query = query, onQueryChange = { query = it })
+    }
+}
+```
+
+Внутри `ModalScreen.ModalContent` тот же `rememberSaveable` получает такую же exact-entry область автоматически.
+
+Один renderer-level `SaveableStateHolder` автоматически помещает каждый content и modal destination в `SaveableStateProvider(entry.id.value)`. Полная history target-а служит retention ledger: невидимый в текущей projection entry сохраняет свой UI state, а после принятого `Pop` его bucket удаляется. Два появления одинакового route с разными IDs получают независимый state; новое появление обязано получить свежий ID. При Activity recreation saveable UI state тех entries, которые всё ещё входят в history, восстанавливается по тем же IDs. Временная typed binding failure не принимает новую history и не очищает эти buckets, но меняет generation физического renderer-а: восстановившийся target начинает без уже уничтоженной outgoing-ветки и не может воскресить её stale modal exit.
+
+При same-revision перепроекции root ↔ nested exact entry перемещается как одна cached `movableContentOf` composition. Target-ветка владеет любым общим ID, поэтому outgoing и incoming layout не создают два provider-а и не запускают navigation motion; уникальная outgoing occurrence может закончить exit отдельно.
+
+Граница остаётся обычной Compose: автоматически сохраняются только значения, допустимые для `rememberSaveable`/`Bundle`, либо значения с явно заданным `Saver`. Простой `remember`, domain state, большие и несериализуемые объекты этим контрактом не сохраняются. Instrumentation contract покрывает Activity recreation, но repository пока не заявляет проверку реального OS process kill для entry UI state. Сохранение state также не обещает нулевую recomposition внешних экранов: строгий gate для неизменившегося parent вынесен в [issue #28](https://github.com/senneco/udf-sandbox/issues/28).
+
+Один renderer-level process-local `ModalPresentationState` находится выше root-анимации. При contiguous navigation revision пропавший modal немедленно исчезает из durable `NavState`, но остаётся в renderer-е как `Exiting(entryId, generation)` до завершения именно своей анимации. Пакетные add/remove не теряют соседние layers, одинаковые routes различаются по entry ID, reorder безопасно snap-ится к текущему desired order, а callback со старым generation становится no-op. Candidate presentation вычисляется чисто во время composition и принимается только в `SideEffect`; обе живые root-ветки получают один набор layers, но target-wins ownership выбирает ровно один физический slot exact `ownerContentEntryId`. Поэтому modal может следовать за owner-ом при cross-root/nested relocation без второго provider-а. `onDismissRequest` отправляет exact-ID action reducer-у, тогда как `onExitFinished` меняет только renderer-local presentation.
 
 `ModalEntrance` явно отличает восстановленную presentation от нового navigation transition. Первый render, восстановленная history, пропуск или rollback revision, reorder и same-revision correction получают `Snap`; bottom sheet сразу начинает в физическом `Expanded` и не переигрывает entrance. Только modal, впервые добавленный ровно следующей contiguous revision, получает `Animate`, а surviving desired layer сохраняет уже принятую entrance semantics.
 
@@ -171,7 +203,7 @@ Bottom-sheet bridge считает presentation state единственным �
 
 Renderer передаёт каждому content-screen явный `childContent`. Screen, который может стать владельцем `ChildOf(...)`, обязан вызвать эту lambda ровно в нужном месте; текущая demo policy создаёт child только у `Home`, а leaf screens её не вызывают. Этот договор и разрыв между публичными `Screen`/`ModalScreen` и internal catalog/renderer остаются незавершённой demo boundary, а не рекомендуемым consumer API.
 
-Scoped device gate и два landscape-кадра для regression #13 сохранены в [evidence issue #13](docs/evidence/issue-13/README.md). Gate retained-modal lifecycle и owner placement находятся в [evidence issue #14](docs/evidence/issue-14/README.md). Cancellation-safe bottom-sheet convergence, exact modal Back, реальный swipe и финальные кадры собраны в [evidence issue #15](docs/evidence/issue-15/README.md). Recreation, primitive `Bundle`/`Parcel` restoration и modal `Snap` bootstrap зафиксированы в [evidence issue #16](docs/evidence/issue-16/README.md).
+Scoped device gate и два landscape-кадра для regression #13 сохранены в [evidence issue #13](docs/evidence/issue-13/README.md). Gate retained-modal lifecycle и owner placement находятся в [evidence issue #14](docs/evidence/issue-14/README.md). Cancellation-safe bottom-sheet convergence, exact modal Back, реальный swipe и финальные кадры собраны в [evidence issue #15](docs/evidence/issue-15/README.md). Recreation, primitive `Bundle`/`Parcel` restoration и modal `Snap` bootstrap зафиксированы в [evidence issue #16](docs/evidence/issue-16/README.md). Exact-entry `rememberSaveable`, relocation, cleanup и Activity recreation покрыты в [evidence issue #17](docs/evidence/issue-17/README.md).
 
 ## Переходы состояния
 
@@ -254,6 +286,7 @@ setContent {
         is NavProjectionResult.Success -> AnimatedNavigation(
             renderTarget = NavigationRenderTarget(
                 navigationRevision = frame.navigationRevision,
+                historyEntryIds = frame.appState.navState.entries.map { it.id },
                 tree = result.tree,
                 transitionIntent = frame.navigationTransition,
             ),
@@ -283,7 +316,8 @@ Pure JVM contracts проверяют wire format, validation/fallback, save-bef
 - [`ModalPresentation.kt`](app/src/main/java/com/shmakov/udf/ModalPresentation.kt) — чистый retained-modal planner, generation tokens и safe reorder fallback.
 - [`BottomSheetPresentation.kt`](app/src/main/java/com/shmakov/udf/composable/common/BottomSheetPresentation.kt) — phase-owned request/completion и cancellation-safe convergence Material motion.
 - [`DestinationTreeBinding.kt`](app/src/main/java/com/shmakov/udf/composable/common/DestinationTreeBinding.kt) — атомарный typed route-to-screen binding всего projected tree.
-- [`AnimatedNavigation.kt`](app/src/main/java/com/shmakov/udf/composable/common/AnimatedNavigation.kt) — recursive root/nested rendering из branch-owned trees, entry-ID keys, content transitions и branch-owned modal presentation.
+- [`EntrySaveableStateHost.kt`](app/src/main/java/com/shmakov/udf/composable/common/EntrySaveableStateHost.kt) — exact-entry `SaveableStateProvider`, movable composition и full-history retention/cleanup ledger.
+- [`AnimatedNavigation.kt`](app/src/main/java/com/shmakov/udf/composable/common/AnimatedNavigation.kt) — recursive root/nested rendering из branch-owned trees, target-wins entry ownership, content transitions и один renderer-level modal presentation lifecycle.
 - [`BottomSheetLayout.kt`](app/src/main/java/com/shmakov/udf/composable/common/BottomSheetLayout.kt) — state-authoritative request/convergence/completion bridge к Material bottom sheet.
 - [`composable/screen/`](app/src/main/java/com/shmakov/udf/composable/screen) — destination adapters с typed actions и явным `childContent` slot.
 - [`composable/content/`](app/src/main/java/com/shmakov/udf/composable/content) — минимальный demo UI и текущие navigation triggers.

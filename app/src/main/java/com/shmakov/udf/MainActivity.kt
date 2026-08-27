@@ -74,6 +74,7 @@ class MainActivity : ComponentActivity() {
             is NavProjectionResult.Success -> AnimatedNavigation(
                 renderTarget = NavigationRenderTarget(
                     navigationRevision = navigationRevision,
+                    historyEntryIds = appState.navState.entries.map { entry -> entry.id },
                     tree = projection.tree,
                     transitionIntent = navTransition,
                 ),

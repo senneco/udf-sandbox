@@ -40,18 +40,106 @@ internal fun AnimatedNavigation(
     onNavigationAction: (NavAction) -> Unit,
     destinationCatalog: DestinationCatalog = DemoDestinationCatalog,
 ) {
-    val boundTree = when (
-        val binding = DestinationTreeBinder.bind(renderTarget.tree, destinationCatalog)
-    ) {
-        is DestinationTreeBindingResult.Success -> binding.tree
+    val entryStateHost = EntrySaveableStateHost.remember()
+    // These holders intentionally survive a typed destination-binding failure. Only a completely
+    // bound target is accepted below, so recovery can reuse the previous entry state and motion
+    // baseline without treating the failed projection as rendered.
+    val acceptedTargetHolder = remember { AcceptedNavigationTargetHolder() }
+    val renderOwnershipHolder = remember { EntryRenderOwnershipHolder() }
+    val modalPresentationHolder = remember { ModalPresentationHolder() }
+    val physicalRendererEpoch = remember { PhysicalRendererEpoch() }
+    when (val binding = DestinationTreeBinder.bind(renderTarget.tree, destinationCatalog)) {
+        is DestinationTreeBindingResult.Success -> key(physicalRendererEpoch.value) {
+            PrepareBoundNavigation(
+                renderTarget = renderTarget,
+                boundTree = binding.tree,
+                entryStateHost = entryStateHost,
+                acceptedTargetHolder = acceptedTargetHolder,
+                renderOwnershipHolder = renderOwnershipHolder,
+                modalPresentationHolder = modalPresentationHolder,
+                physicalRendererEpoch = physicalRendererEpoch,
+                onNavigationAction = onNavigationAction,
+            )
+        }
+
         is DestinationTreeBindingResult.Failure -> {
             DestinationBindingFailure(binding.problem)
-            return
+            MarkPhysicalRendererGap(physicalRendererEpoch)
         }
     }
-    // This holder belongs only to the active renderer composition. It deliberately is not saveable
-    // or store-owned: recreation starts at the current target without replaying process-local motion.
-    val acceptedTargetHolder = remember { AcceptedNavigationTargetHolder() }
+}
+
+/**
+ * Prepares one completely typed navigation tree before creating its physical animated subtree.
+ * A binding failure therefore removes the whole subtree, including its transition ownership,
+ * while the accepted lifecycle holders above survive for a later valid target.
+ */
+@Composable
+private fun PrepareBoundNavigation(
+    renderTarget: NavigationRenderTarget,
+    boundTree: BoundNavigationRenderTree,
+    entryStateHost: EntrySaveableStateHost,
+    acceptedTargetHolder: AcceptedNavigationTargetHolder,
+    renderOwnershipHolder: EntryRenderOwnershipHolder,
+    modalPresentationHolder: ModalPresentationHolder,
+    physicalRendererEpoch: PhysicalRendererEpoch,
+    onNavigationAction: (NavAction) -> Unit,
+) {
+    val previousModalPresentation = modalPresentationHolder.accepted
+    val candidateModalState = if (previousModalPresentation == null) {
+        ModalPresentationPlanner.start(
+            navigationRevision = renderTarget.navigationRevision,
+            desired = boundTree.modalLayers.map { layer -> layer.layer },
+        )
+    } else {
+        ModalPresentationPlanner.reconcile(
+            previous = previousModalPresentation.state,
+            navigationRevision = renderTarget.navigationRevision,
+            desired = boundTree.modalLayers.map { layer -> layer.layer },
+        ).state
+    }
+    when (
+        val binding = DestinationTreeBinder.materializePresentedModalLayers(
+            layers = candidateModalState.layers,
+            desiredLayers = boundTree.modalLayers,
+            acceptedLayers = previousModalPresentation?.layers.orEmpty(),
+        )
+    ) {
+        is PresentedModalLayersBindingResult.Success -> RenderMaterializedNavigation(
+            renderTarget = renderTarget,
+            boundTree = boundTree,
+            candidateModalState = candidateModalState,
+            candidateModalLayers = binding.layers,
+            entryStateHost = entryStateHost,
+            acceptedTargetHolder = acceptedTargetHolder,
+            renderOwnershipHolder = renderOwnershipHolder,
+            modalPresentationHolder = modalPresentationHolder,
+            physicalRendererEpoch = physicalRendererEpoch,
+            onNavigationAction = onNavigationAction,
+        )
+
+        is PresentedModalLayersBindingResult.Failure -> {
+            DestinationBindingFailure(binding.problem)
+            MarkPhysicalRendererGap(physicalRendererEpoch)
+        }
+    }
+}
+
+@Composable
+private fun RenderMaterializedNavigation(
+    renderTarget: NavigationRenderTarget,
+    boundTree: BoundNavigationRenderTree,
+    candidateModalState: ModalPresentationState,
+    candidateModalLayers: List<BoundPresentedModalLayer>,
+    entryStateHost: EntrySaveableStateHost,
+    acceptedTargetHolder: AcceptedNavigationTargetHolder,
+    renderOwnershipHolder: EntryRenderOwnershipHolder,
+    modalPresentationHolder: ModalPresentationHolder,
+    physicalRendererEpoch: PhysicalRendererEpoch,
+    onNavigationAction: (NavAction) -> Unit,
+) {
+    // Accepted-target motion metadata belongs only to this renderer composition. Unlike entry UI
+    // state, it is deliberately not saveable or store-owned, so recreation cannot replay motion.
     val contentMotion = NavigationPresentationPlanner.contentMotion(
         previous = acceptedTargetHolder.target,
         target = renderTarget,
@@ -61,15 +149,30 @@ internal fun AnimatedNavigation(
         tree = boundTree,
         contentMotion = contentMotion,
     )
-    // Accept only a target whose complete destination tree composed successfully. A same-revision
-    // layout reprojection then compares against this accepted target, not an animation's N-1 branch.
-    SideEffect {
-        acceptedTargetHolder.target = renderTarget
-    }
     val transition = androidx.compose.animation.core.updateTransition(
         targetState = targetState,
         label = "NavigationRoot",
     )
+    val latestTarget = transition.targetState.renderTarget
+    val renderOwnership = renderOwnershipHolder.prepare(
+        latestTarget = latestTarget,
+        physicalRendererEpoch = physicalRendererEpoch.value,
+    )
+    val candidateModalPresentation = AcceptedModalPresentation(
+        state = candidateModalState,
+        layers = candidateModalLayers,
+    ).withoutUnreachableExits(renderOwnership)
+    // Accept only a target whose complete destination tree composed successfully. A same-revision
+    // layout reprojection then compares against this accepted target, not an animation's N-1 branch.
+    SideEffect {
+        acceptedTargetHolder.target = renderTarget
+        renderOwnershipHolder.accept(
+            candidate = renderOwnership,
+            physicalRendererEpoch = physicalRendererEpoch.value,
+        )
+        modalPresentationHolder.accept(candidateModalPresentation)
+        entryStateHost.accept(renderTarget.historyEntryIds)
+    }
 
     transition.AnimatedContent(
         modifier = Modifier.fillMaxSize(),
@@ -78,7 +181,11 @@ internal fun AnimatedNavigation(
     ) { branchState ->
         RenderNavigationBranch(
             branchState = branchState,
+            modalLayers = candidateModalPresentation.layers,
+            entryStateHost = entryStateHost,
+            renderOwnership = renderOwnership,
             onNavigationAction = onNavigationAction,
+            onExitFinished = modalPresentationHolder::completeExit,
         )
     }
 }
@@ -86,63 +193,20 @@ internal fun AnimatedNavigation(
 @Composable
 private fun RenderNavigationBranch(
     branchState: BoundRenderState,
+    modalLayers: List<BoundPresentedModalLayer>,
+    entryStateHost: EntrySaveableStateHost,
+    renderOwnership: EntryRenderOwnership,
     onNavigationAction: (NavAction) -> Unit,
+    onExitFinished: (ModalExitToken) -> Unit,
 ) {
-    val desiredModalLayers = branchState.tree.modalLayers.map { layer -> layer.layer }
-    val presentationHolder = remember {
-        val initialState = ModalPresentationPlanner.start(
-            navigationRevision = branchState.renderTarget.navigationRevision,
-            desired = desiredModalLayers,
-        )
-        ModalPresentationHolder(
-            AcceptedModalPresentation(
-                state = initialState,
-                layers = branchState.tree.modalLayers.map { layer ->
-                    BoundPresentedModalLayer(
-                        presentation = PresentedModalLayer.Desired(
-                            layer = layer.layer,
-                            entrance = ModalEntrance.Snap,
-                        ),
-                        screen = layer.screen,
-                    )
-                },
-            ),
-        )
-    }
-    val acceptedPresentation = presentationHolder.accepted
-    val candidateState = ModalPresentationPlanner.reconcile(
-        previous = acceptedPresentation.state,
-        navigationRevision = branchState.renderTarget.navigationRevision,
-        desired = desiredModalLayers,
-    ).state
-    val candidateLayers = when (
-        val binding = DestinationTreeBinder.materializePresentedModalLayers(
-            layers = candidateState.layers,
-            desiredLayers = branchState.tree.modalLayers,
-            acceptedLayers = acceptedPresentation.layers,
-        )
-    ) {
-        is PresentedModalLayersBindingResult.Success -> binding.layers
-        is PresentedModalLayersBindingResult.Failure -> {
-            DestinationBindingFailure(binding.problem)
-            return
-        }
-    }
-    val candidatePresentation = AcceptedModalPresentation(
-        state = candidateState,
-        layers = candidateLayers,
-    )
-
-    SideEffect {
-        presentationHolder.accept(candidatePresentation)
-    }
-
     RenderContentSlot(
         branchState = branchState,
         contentSlot = branchState.tree.root,
-        modalLayers = candidateLayers,
+        modalLayers = modalLayers,
+        entryStateHost = entryStateHost,
+        renderOwnership = renderOwnership,
         onNavigationAction = onNavigationAction,
-        onExitFinished = presentationHolder::completeExit,
+        onExitFinished = onExitFinished,
     )
 }
 
@@ -151,20 +215,59 @@ private data class AcceptedModalPresentation(
     val layers: List<BoundPresentedModalLayer>,
 )
 
-private class ModalPresentationHolder(
-    initial: AcceptedModalPresentation,
-) {
-    var accepted: AcceptedModalPresentation by mutableStateOf(initial)
+/**
+ * Drops an exit whose exact content owner is no longer reachable in either live render target.
+ * Surviving owners can carry this one global presentation across root and nested reparenting.
+ */
+private fun AcceptedModalPresentation.withoutUnreachableExits(
+    renderOwnership: EntryRenderOwnership,
+): AcceptedModalPresentation {
+    var prunedState = state
+    val removedTokens = LinkedHashSet<ModalExitToken>()
+    layers.forEach { layer ->
+        val presentation = layer.presentation as? PresentedModalLayer.Exiting
+            ?: return@forEach
+        if (!renderOwnership.hasPhysicalOwner(presentation.layer.ownerContentEntryId)) {
+            when (val completion = ModalPresentationPlanner.completeExit(
+                previous = prunedState,
+                token = presentation.token,
+            )) {
+                is ModalExitCompletion.Applied -> {
+                    prunedState = completion.state
+                    removedTokens += presentation.token
+                }
+
+                is ModalExitCompletion.Unchanged -> Unit
+            }
+        }
+    }
+    if (removedTokens.isEmpty()) return this
+
+    return AcceptedModalPresentation(
+        state = prunedState,
+        layers = layers.filterNot { layer ->
+            val presentation = layer.presentation
+            presentation is PresentedModalLayer.Exiting &&
+                presentation.token in removedTokens
+        },
+    )
+}
+
+private class ModalPresentationHolder {
+    var accepted: AcceptedModalPresentation? by mutableStateOf(null)
         private set
 
     fun accept(candidate: AcceptedModalPresentation) {
-        if (accepted != candidate) {
+        // Catalogs materialize fresh Screen objects on recomposition. Presentation state is the
+        // semantic identity; replacing an equal state only because its binding object is fresh
+        // would invalidate this holder forever.
+        if (accepted?.state != candidate.state) {
             accepted = candidate
         }
     }
 
     fun completeExit(token: ModalExitToken) {
-        val previous = accepted
+        val previous = accepted ?: return
         when (val completion = ModalPresentationPlanner.completeExit(previous.state, token)) {
             is ModalExitCompletion.Applied -> {
                 val remainingLayers = previous.layers.filterNot { layer ->
@@ -187,6 +290,26 @@ private class AcceptedNavigationTargetHolder {
     var target: NavigationRenderTarget? = null
 }
 
+/** Forces a fresh physical transition after one or more consecutive binding failures. */
+private class PhysicalRendererEpoch {
+    var value: Long = 0L
+        private set
+
+    fun advance() {
+        value += 1L
+    }
+}
+
+@Composable
+private fun MarkPhysicalRendererGap(epoch: PhysicalRendererEpoch) {
+    // A DisposableEffect enters only once for a consecutive failure interval. Advancing plain,
+    // non-snapshot state here avoids both composition-time mutation and an invalidation loop.
+    DisposableEffect(epoch) {
+        epoch.advance()
+        onDispose { }
+    }
+}
+
 private class BoundRenderState(
     val renderTarget: NavigationRenderTarget,
     val tree: BoundNavigationRenderTree,
@@ -203,26 +326,38 @@ private fun RenderContentSlot(
     branchState: BoundRenderState,
     contentSlot: BoundContentSlot,
     modalLayers: List<BoundPresentedModalLayer>,
+    entryStateHost: EntrySaveableStateHost,
+    renderOwnership: EntryRenderOwnership,
     onNavigationAction: (NavAction) -> Unit,
     onExitFinished: (ModalExitToken) -> Unit,
 ) {
-    contentSlot.screen.Content(
-        childContent = {
-            RenderChildContent(
-                branchState = branchState,
-                ownerContentEntryId = contentSlot.slot.entry.id,
-                modalLayers = modalLayers,
+    val entryId = contentSlot.slot.entry.id
+    if (renderOwnership.ownsContent(branchState.renderTarget, entryId)) {
+        entryStateHost.Render(entryId) {
+            contentSlot.screen.Content(
+                childContent = {
+                    RenderChildContent(
+                        branchState = branchState,
+                        ownerContentEntryId = entryId,
+                        modalLayers = modalLayers,
+                        entryStateHost = entryStateHost,
+                        renderOwnership = renderOwnership,
+                        onNavigationAction = onNavigationAction,
+                        onExitFinished = onExitFinished,
+                    )
+                },
                 onNavigationAction = onNavigationAction,
-                onExitFinished = onExitFinished,
             )
-        },
-        onNavigationAction = onNavigationAction,
-    )
+        }
+    }
 
     RenderModalLayers(
+        physicalBranchTarget = branchState.renderTarget,
         modalLayers = modalLayers.filter { modalLayer ->
-            modalLayer.presentation.layer.ownerContentEntryId == contentSlot.slot.entry.id
+            modalLayer.presentation.layer.ownerContentEntryId == entryId
         },
+        entryStateHost = entryStateHost,
+        renderOwnership = renderOwnership,
         onNavigationAction = onNavigationAction,
         onExitFinished = onExitFinished,
     )
@@ -233,6 +368,8 @@ private fun RenderChildContent(
     branchState: BoundRenderState,
     ownerContentEntryId: EntryId,
     modalLayers: List<BoundPresentedModalLayer>,
+    entryStateHost: EntrySaveableStateHost,
+    renderOwnership: EntryRenderOwnership,
     onNavigationAction: (NavAction) -> Unit,
     onExitFinished: (ModalExitToken) -> Unit,
 ) {
@@ -254,6 +391,8 @@ private fun RenderChildContent(
                 branchState = childBranchState,
                 contentSlot = childSlot,
                 modalLayers = modalLayers,
+                entryStateHost = entryStateHost,
+                renderOwnership = renderOwnership,
                 onNavigationAction = onNavigationAction,
                 onExitFinished = onExitFinished,
             )
@@ -275,7 +414,10 @@ private fun BoundNavigationRenderTree.childOf(
 
 @Composable
 private fun RenderModalLayers(
+    physicalBranchTarget: NavigationRenderTarget,
     modalLayers: List<BoundPresentedModalLayer>,
+    entryStateHost: EntrySaveableStateHost,
+    renderOwnership: EntryRenderOwnership,
     onNavigationAction: (NavAction) -> Unit,
     onExitFinished: (ModalExitToken) -> Unit,
 ) {
@@ -283,35 +425,44 @@ private fun RenderModalLayers(
         val presentation = modalLayer.presentation
         val entryId = presentation.layer.entry.id
         val exitToken = (presentation as? PresentedModalLayer.Exiting)?.token
-        key(entryId) {
-            if (exitToken != null) {
-                DisposableEffect(exitToken) {
-                    onDispose {
-                        onExitFinished(exitToken)
+        if (
+            renderOwnership.ownsModalSlot(
+                physicalBranchTarget = physicalBranchTarget,
+                ownerContentEntryId = presentation.layer.ownerContentEntryId,
+            )
+        ) {
+            entryStateHost.Render(entryId) {
+                key(entryId) {
+                    if (exitToken != null) {
+                        DisposableEffect(exitToken) {
+                            onDispose {
+                                onExitFinished(exitToken)
+                            }
+                        }
                     }
+                    modalLayer.screen.ModalContent(
+                        targetState = when (presentation) {
+                            is PresentedModalLayer.Desired -> ModalScreenState.Shown
+                            is PresentedModalLayer.Exiting -> ModalScreenState.Hidden
+                        },
+                        entrance = when (presentation) {
+                            is PresentedModalLayer.Desired -> presentation.entrance
+                            is PresentedModalLayer.Exiting -> ModalEntrance.Snap
+                        },
+                        onDismissRequest = {
+                            if (presentation is PresentedModalLayer.Desired) {
+                                onNavigationAction(NavAction.dismissModal(entryId))
+                            }
+                        },
+                        onExitFinished = {
+                            if (exitToken != null) {
+                                onExitFinished(exitToken)
+                            }
+                        },
+                        onNavigationAction = onNavigationAction,
+                    )
                 }
             }
-            modalLayer.screen.ModalContent(
-                targetState = when (presentation) {
-                    is PresentedModalLayer.Desired -> ModalScreenState.Shown
-                    is PresentedModalLayer.Exiting -> ModalScreenState.Hidden
-                },
-                entrance = when (presentation) {
-                    is PresentedModalLayer.Desired -> presentation.entrance
-                    is PresentedModalLayer.Exiting -> ModalEntrance.Snap
-                },
-                onDismissRequest = {
-                    if (presentation is PresentedModalLayer.Desired) {
-                        onNavigationAction(NavAction.dismissModal(entryId))
-                    }
-                },
-                onExitFinished = {
-                    if (exitToken != null) {
-                        onExitFinished(exitToken)
-                    }
-                },
-                onNavigationAction = onNavigationAction,
-            )
         }
     }
 }
