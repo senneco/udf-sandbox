@@ -33,6 +33,7 @@ import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.AccountDetails
 import com.shmakov.udf.navigation.Accounts
 import com.shmakov.udf.navigation.BackStackEntry
+import com.shmakov.udf.navigation.Cards
 import com.shmakov.udf.navigation.ContentPlacementDecision
 import com.shmakov.udf.navigation.ContentRoute
 import com.shmakov.udf.navigation.EntryId
@@ -75,7 +76,8 @@ class AnimatedNavigationRegressionTest {
         val currentTarget = mutableStateOf(
             target(
                 revision = 0,
-                tree = project(state(home, accounts, account), expandedPane),
+                navState = state(home, accounts, account),
+                policy = expandedPane,
                 transition = null,
             ),
         )
@@ -98,7 +100,8 @@ class AnimatedNavigationRegressionTest {
         composeRule.runOnIdle {
             currentTarget.value = target(
                 revision = 1,
-                tree = project(state(home, accounts, account, details), expandedPane),
+                navState = state(home, accounts, account, details),
+                policy = expandedPane,
                 transition = NavTransitionIntent.Pushed(
                     fromEntryId = account.id,
                     addedEntryId = details.id,
@@ -135,7 +138,8 @@ class AnimatedNavigationRegressionTest {
         val currentTarget = mutableStateOf(
             target(
                 revision = 9,
-                tree = project(navState, singlePane),
+                navState = navState,
+                policy = singlePane,
                 transition = stickyIntent,
             ),
         )
@@ -157,7 +161,8 @@ class AnimatedNavigationRegressionTest {
         composeRule.runOnIdle {
             currentTarget.value = target(
                 revision = 9,
-                tree = project(navState, expandedPane),
+                navState = navState,
+                policy = expandedPane,
                 transition = stickyIntent,
             )
         }
@@ -180,7 +185,8 @@ class AnimatedNavigationRegressionTest {
         val currentTarget = mutableStateOf(
             target(
                 revision = 0,
-                tree = project(state(home, first), singlePane),
+                navState = state(home, first),
+                policy = singlePane,
                 transition = null,
             ),
         )
@@ -205,7 +211,8 @@ class AnimatedNavigationRegressionTest {
         composeRule.runOnIdle {
             currentTarget.value = target(
                 revision = 1,
-                tree = project(state(home, first, second, third), singlePane),
+                navState = state(home, first, second, third),
+                policy = singlePane,
                 transition = NavTransitionIntent.HistoryReplaced(
                     previousTopEntryId = first.id,
                     targetTopEntryId = third.id,
@@ -234,7 +241,8 @@ class AnimatedNavigationRegressionTest {
         composeRule.runOnIdle {
             currentTarget.value = target(
                 revision = 2,
-                tree = project(state(home, first), singlePane),
+                navState = state(home, first),
+                policy = singlePane,
                 transition = NavTransitionIntent.HistoryReplaced(
                     previousTopEntryId = third.id,
                     targetTopEntryId = first.id,
@@ -298,7 +306,8 @@ class AnimatedNavigationRegressionTest {
         val currentTarget = mutableStateOf(
             target(
                 revision = 100,
-                tree = project(state(home, modal), singlePane),
+                navState = state(home, modal),
+                policy = singlePane,
                 transition = null,
             ),
         )
@@ -320,7 +329,8 @@ class AnimatedNavigationRegressionTest {
         composeRule.runOnIdle {
             currentTarget.value = target(
                 revision = 101,
-                tree = project(state(home), singlePane),
+                navState = state(home),
+                policy = singlePane,
                 transition = NavTransitionIntent.ModalDismissed(modal.id),
             )
         }
@@ -334,7 +344,8 @@ class AnimatedNavigationRegressionTest {
         composeRule.runOnIdle {
             currentTarget.value = target(
                 revision = 102,
-                tree = project(state(home, modal), singlePane),
+                navState = state(home, modal),
+                policy = singlePane,
                 transition = NavTransitionIntent.Pushed(
                     fromEntryId = home.id,
                     addedEntryId = modal.id,
@@ -360,7 +371,8 @@ class AnimatedNavigationRegressionTest {
         composeRule.runOnIdle {
             currentTarget.value = target(
                 revision = 103,
-                tree = project(state(home), singlePane),
+                navState = state(home),
+                policy = singlePane,
                 transition = NavTransitionIntent.ModalDismissed(modal.id),
             )
         }
@@ -400,7 +412,8 @@ class AnimatedNavigationRegressionTest {
         val currentTarget = mutableStateOf(
             target(
                 revision = 200,
-                tree = project(state(home, first), singlePane),
+                navState = state(home, first),
+                policy = singlePane,
                 transition = null,
             ),
         )
@@ -441,7 +454,8 @@ class AnimatedNavigationRegressionTest {
         composeRule.runOnIdle {
             currentTarget.value = target(
                 revision = 201,
-                tree = project(state(home, second), singlePane),
+                navState = state(home, second),
+                policy = singlePane,
                 transition = NavTransitionIntent.HistoryReplaced(
                     previousTopEntryId = first.id,
                     targetTopEntryId = second.id,
@@ -521,7 +535,8 @@ class AnimatedNavigationRegressionTest {
                 AnimatedNavigation(
                     renderTarget = target(
                         revision = 0,
-                        tree = project(state(home, accounts, account), expandedPane),
+                        navState = state(home, accounts, account),
+                        policy = expandedPane,
                         transition = null,
                     ),
                     onNavigationAction = {},
@@ -537,6 +552,152 @@ class AnimatedNavigationRegressionTest {
     }
 
     @Test
+    fun crossRootDeepOwnerRelocationStillRendersExactModalExit() {
+        composeRule.mainClock.autoAdvance = false
+        val oldRoot = entry("cross-root-old-root", Home)
+        val newRoot = entry("cross-root-new-root", Transactions)
+        val sharedParent = entry("cross-root-shared-parent", Accounts)
+        val owner = entry("cross-root-modal-owner", Cards)
+        val modal = entry("cross-root-exiting-modal", Account(accountId = 92))
+        val oldPolicy = NavigationLayoutPolicy { request ->
+            when (request.nextContent.id) {
+                sharedParent.id -> ContentPlacementDecision.childOf(oldRoot.id)
+                owner.id -> ContentPlacementDecision.childOf(sharedParent.id)
+                else -> ContentPlacementDecision.root()
+            }
+        }
+        val newPolicy = NavigationLayoutPolicy { request ->
+            when (request.nextContent.id) {
+                oldRoot.id -> ContentPlacementDecision.childOf(newRoot.id)
+                sharedParent.id -> ContentPlacementDecision.childOf(oldRoot.id)
+                owner.id -> ContentPlacementDecision.childOf(sharedParent.id)
+                else -> ContentPlacementDecision.root()
+            }
+        }
+        val probe = ModalLifecycleProbe()
+        val currentTarget = mutableStateOf(
+            target(
+                revision = 0,
+                navState = state(oldRoot, sharedParent, owner, modal),
+                policy = oldPolicy,
+                transition = null,
+            ),
+        )
+
+        composeRule.setContent {
+            AnimatedNavigation(
+                renderTarget = currentTarget.value,
+                onNavigationAction = {},
+                destinationCatalog = ProbedDestinationCatalog(probe),
+            )
+        }
+        composeRule.waitForIdle()
+        assertModalCount(modal.id, 1)
+        assertEquals(ModalScreenState.Shown, probe.targetState(modal.id))
+
+        composeRule.runOnIdle {
+            currentTarget.value = target(
+                revision = 1,
+                // Every old content entry survives under a new root, but M is removed. The old
+                // presentation must follow its exact owner into the latest physical slot.
+                navState = state(newRoot, oldRoot, sharedParent, owner),
+                policy = newPolicy,
+                transition = NavTransitionIntent.HistoryReplaced(
+                    previousTopEntryId = modal.id,
+                    targetTopEntryId = owner.id,
+                ),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        assertModalCount(modal.id, 1)
+        assertEquals(ModalScreenState.Hidden, probe.targetState(modal.id))
+        val exactExitCompletion = probe.exitFinishedCallback(modal.id)
+
+        composeRule.runOnIdle {
+            exactExitCompletion()
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+        assertModalCount(modal.id, 0)
+    }
+
+    @Test
+    fun bindingFailureGapCannotResurrectExitWhenItsOwnerReturns() {
+        composeRule.mainClock.autoAdvance = false
+        val home = entry("binding-gap-home", Home)
+        val owner = entry("binding-gap-owner", Accounts)
+        val modal = entry("binding-gap-modal", Account(accountId = 93))
+        val replacement = entry("binding-gap-replacement", Transactions)
+        val probe = ModalLifecycleProbe()
+        val catalog = ToggleableProbedDestinationCatalog(probe)
+        val currentTarget = mutableStateOf(
+            target(
+                revision = 0,
+                navState = state(home, owner, modal),
+                policy = expandedPane,
+                transition = null,
+            ),
+        )
+
+        composeRule.setContent {
+            AnimatedNavigation(
+                renderTarget = currentTarget.value,
+                onNavigationAction = {},
+                destinationCatalog = catalog,
+            )
+        }
+        composeRule.waitForIdle()
+        assertModalCount(modal.id, 1)
+        assertEquals(ModalScreenState.Shown, probe.targetState(modal.id))
+
+        composeRule.runOnIdle {
+            catalog.rejectBindings = true
+            currentTarget.value = target(
+                revision = 1,
+                navState = state(replacement),
+                policy = singlePane,
+                transition = NavTransitionIntent.HistoryReplaced(
+                    previousTopEntryId = modal.id,
+                    targetTopEntryId = replacement.id,
+                ),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+        assertTrue("The replacement target must reach the binding failure", catalog.rejections > 0)
+
+        composeRule.runOnIdle {
+            catalog.rejectBindings = false
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.waitForIdle()
+
+        composeRule.runOnIdle {
+            currentTarget.value = target(
+                revision = 2,
+                // The exact owner returns, but M does not. A stale retained exit from before the
+                // binding gap must already have been pruned when B recovered.
+                navState = state(home, owner),
+                policy = expandedPane,
+                transition = NavTransitionIntent.HistoryReplaced(
+                    previousTopEntryId = replacement.id,
+                    targetTopEntryId = owner.id,
+                ),
+            )
+        }
+        composeRule.mainClock.advanceTimeByFrame()
+        composeRule.mainClock.advanceTimeBy(AFTER_ANIMATION_MILLIS)
+        composeRule.waitForIdle()
+        assertEquals(
+            "The pre-gap modal must never be rendered again as a stale exit",
+            ModalScreenState.Shown,
+            probe.targetState(modal.id),
+        )
+    }
+
+    @Test
     fun disappearingNestedOwnerReleasesItsExactExitWithoutDurableAction() {
         composeRule.mainClock.autoAdvance = false
         val home = entry("dispose-home", Home)
@@ -549,7 +710,8 @@ class AnimatedNavigationRegressionTest {
         val currentTarget = mutableStateOf(
             target(
                 revision = 0,
-                tree = project(state(home, accounts, account), ownerPolicy),
+                navState = state(home, accounts, account),
+                policy = ownerPolicy,
                 transition = null,
             ),
         )
@@ -568,10 +730,8 @@ class AnimatedNavigationRegressionTest {
         composeRule.runOnIdle {
             currentTarget.value = target(
                 revision = 1,
-                tree = project(
-                    state(home, accounts, account, transactions),
-                    ownerPolicy,
-                ),
+                navState = state(home, accounts, account, transactions),
+                policy = ownerPolicy,
                 transition = NavTransitionIntent.BranchReplaced(
                     sourceEntryId = home.id,
                     removedEntryIds = listOf(accounts.id, account.id),
@@ -593,7 +753,8 @@ class AnimatedNavigationRegressionTest {
         composeRule.runOnIdle {
             currentTarget.value = target(
                 revision = 2,
-                tree = project(state(home, accounts), ownerPolicy),
+                navState = state(home, accounts),
+                policy = ownerPolicy,
                 transition = NavTransitionIntent.HistoryReplaced(
                     previousTopEntryId = transactions.id,
                     targetTopEntryId = accounts.id,
@@ -631,11 +792,13 @@ class AnimatedNavigationRegressionTest {
 
     private fun target(
         revision: Long,
-        tree: NavigationRenderTree,
+        navState: NavState,
+        policy: NavigationLayoutPolicy,
         transition: NavTransitionIntent?,
     ): NavigationRenderTarget = NavigationRenderTarget(
         navigationRevision = revision,
-        tree = tree,
+        historyEntryIds = navState.entries.map { entry -> entry.id },
+        tree = project(navState, policy),
         transitionIntent = transition,
     )
 
@@ -852,6 +1015,30 @@ private class ProbedDestinationCatalog(
         is ModalRoute -> DestinationBinding.Modal(ProbedModalScreen(entry, probe))
         else -> DestinationBinding.Unsupported(entry)
     }
+}
+
+private class ToggleableProbedDestinationCatalog(
+    probe: ModalLifecycleProbe,
+) : DestinationCatalog {
+    private val delegate = ProbedDestinationCatalog(probe)
+    private val rejectBindingsState = mutableStateOf(false)
+
+    var rejections: Int = 0
+        private set
+
+    var rejectBindings: Boolean
+        get() = rejectBindingsState.value
+        set(value) {
+            rejectBindingsState.value = value
+        }
+
+    override fun resolve(entry: BackStackEntry): DestinationBinding =
+        if (rejectBindings) {
+            rejections += 1
+            DestinationBinding.Unsupported(entry)
+        } else {
+            delegate.resolve(entry)
+        }
 }
 
 private class ProbedModalScreen(
