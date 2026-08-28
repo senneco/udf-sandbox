@@ -18,6 +18,8 @@ internal fun interface DestinationCatalog {
 internal sealed class DestinationBinding {
     data class Content(
         val screen: Screen,
+        /** Equality key for immutable parent UI inputs not already represented by the entry. */
+        val parentInputsKey: Any?,
     ) : DestinationBinding()
 
     data class Modal(
@@ -65,6 +67,7 @@ internal sealed class DestinationTreeBindingProblem {
 internal data class BoundContentSlot(
     val slot: ContentSlot,
     val screen: Screen,
+    val parentInputsKey: Any?,
 )
 
 internal data class BoundModalLayer(
@@ -143,14 +146,22 @@ internal object DestinationTreeBinder {
         catalog: DestinationCatalog,
     ): DestinationTreeBindingResult {
         val root = when (val result = catalog.resolveContent(tree.root.entry)) {
-            is BindingOutcome.Resolved -> BoundContentSlot(tree.root, result.value)
+            is BindingOutcome.Resolved -> BoundContentSlot(
+                slot = tree.root,
+                screen = result.value.screen,
+                parentInputsKey = result.value.parentInputsKey,
+            )
             is BindingOutcome.Failed -> return DestinationTreeBindingResult.Failure(result.problem)
         }
 
         val nestedSlots = ArrayList<BoundContentSlot>(tree.nestedSlots.size)
         tree.nestedSlots.forEach { slot ->
             when (val result = catalog.resolveContent(slot.entry)) {
-                is BindingOutcome.Resolved -> nestedSlots += BoundContentSlot(slot, result.value)
+                is BindingOutcome.Resolved -> nestedSlots += BoundContentSlot(
+                    slot = slot,
+                    screen = result.value.screen,
+                    parentInputsKey = result.value.parentInputsKey,
+                )
                 is BindingOutcome.Failed -> {
                     return DestinationTreeBindingResult.Failure(result.problem)
                 }
@@ -220,22 +231,23 @@ private sealed class BindingOutcome<out T> {
 
 private fun DestinationCatalog.resolveContent(
     entry: BackStackEntry,
-): BindingOutcome<Screen> = when (val result = resolveSafely(entry, DestinationKind.Content)) {
-    is SafeCatalogResult.Resolved -> when (val binding = result.binding) {
-        is DestinationBinding.Content -> BindingOutcome.Resolved(binding.screen)
-        is DestinationBinding.Modal -> BindingOutcome.Failed(
-            DestinationTreeBindingProblem.KindMismatch(
-                entry = entry,
-                expectedKind = DestinationKind.Content,
-                actualKind = DestinationKind.Modal,
-            ),
-        )
-        is DestinationBinding.Unsupported -> BindingOutcome.Failed(
-            DestinationTreeBindingProblem.Unsupported(binding.entry),
-        )
+): BindingOutcome<DestinationBinding.Content> =
+    when (val result = resolveSafely(entry, DestinationKind.Content)) {
+        is SafeCatalogResult.Resolved -> when (val binding = result.binding) {
+            is DestinationBinding.Content -> BindingOutcome.Resolved(binding)
+            is DestinationBinding.Modal -> BindingOutcome.Failed(
+                DestinationTreeBindingProblem.KindMismatch(
+                    entry = entry,
+                    expectedKind = DestinationKind.Content,
+                    actualKind = DestinationKind.Modal,
+                ),
+            )
+            is DestinationBinding.Unsupported -> BindingOutcome.Failed(
+                DestinationTreeBindingProblem.Unsupported(binding.entry),
+            )
+        }
+        is SafeCatalogResult.Failed -> BindingOutcome.Failed(result.problem)
     }
-    is SafeCatalogResult.Failed -> BindingOutcome.Failed(result.problem)
-}
 
 private fun DestinationCatalog.resolveModal(
     entry: BackStackEntry,

@@ -847,7 +847,10 @@ private val OWNER_OFFSET_Y = 64.dp
 
 private object TaggedDestinationCatalog : DestinationCatalog {
     override fun resolve(entry: BackStackEntry): DestinationBinding = when (entry.route) {
-        is ContentRoute -> DestinationBinding.Content(TaggedContentScreen(entry))
+        is ContentRoute -> DestinationBinding.Content(
+            TaggedContentScreen(entry),
+            parentInputsKey = Unit,
+        )
         is ModalRoute -> DestinationBinding.Modal(TaggedModalScreen(entry))
         else -> DestinationBinding.Unsupported(entry)
     }
@@ -873,7 +876,10 @@ private class TaggedContentScreen(
 
 private object OwnerGeometryDestinationCatalog : DestinationCatalog {
     override fun resolve(entry: BackStackEntry): DestinationBinding = when (entry.route) {
-        is ContentRoute -> DestinationBinding.Content(OwnerGeometryContentScreen(entry))
+        is ContentRoute -> DestinationBinding.Content(
+            OwnerGeometryContentScreen(entry),
+            parentInputsKey = Unit,
+        )
         is ModalRoute -> DestinationBinding.Modal(TaggedModalScreen(entry))
         else -> DestinationBinding.Unsupported(entry)
     }
@@ -930,7 +936,10 @@ private class MaterialBottomSheetDestinationCatalog(
     private val probe: MaterialModalProbe,
 ) : DestinationCatalog {
     override fun resolve(entry: BackStackEntry): DestinationBinding = when (entry.route) {
-        is ContentRoute -> DestinationBinding.Content(TaggedContentScreen(entry))
+        is ContentRoute -> DestinationBinding.Content(
+            TaggedContentScreen(entry),
+            parentInputsKey = Unit,
+        )
         is ModalRoute -> DestinationBinding.Modal(MaterialBottomSheetModalScreen(entry, probe))
         else -> DestinationBinding.Unsupported(entry)
     }
@@ -1011,7 +1020,10 @@ private class ProbedDestinationCatalog(
     private val probe: ModalLifecycleProbe,
 ) : DestinationCatalog {
     override fun resolve(entry: BackStackEntry): DestinationBinding = when (entry.route) {
-        is ContentRoute -> DestinationBinding.Content(TaggedContentScreen(entry))
+        is ContentRoute -> DestinationBinding.Content(
+            TaggedContentScreen(entry),
+            parentInputsKey = Unit,
+        )
         is ModalRoute -> DestinationBinding.Modal(ProbedModalScreen(entry, probe))
         else -> DestinationBinding.Unsupported(entry)
     }

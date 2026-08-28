@@ -70,6 +70,7 @@ adb -s "$ANDROID_SERIAL" shell am instrument -w -r \
 | Scrim и swipe dismissal | Два `ReferenceNavigationE2ETest` journey и phase-focused `BottomSheetLayoutRegressionTest` |
 | Activity recreation | `MainActivityDeepLinkRegressionTest` и `MainActivityRestorationRegressionTest` |
 | Независимый UI state одинаковых routes | `EntrySaveableStateRegressionTest.duplicateRoutesWithDifferentEntryIdsKeepIndependentState` |
+| Изоляция неизменившегося parent от nested recomposition | `NestedRecompositionIsolationRegressionTest` и pure projection contract |
 | Retained outgoing/modal presentation | `AnimatedNavigationRegressionTest` |
 
 Black-box E2E меняет state только через UI semantics, gestures, Android Back и orientation. Он не

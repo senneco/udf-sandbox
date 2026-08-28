@@ -21,13 +21,19 @@ import com.shmakov.udf.navigation.Transactions
 /** Complete renderer catalog for the routes declared by the demo application. */
 internal object DemoDestinationCatalog : DestinationCatalog {
     override fun resolve(entry: BackStackEntry): DestinationBinding = when (entry.route) {
-        is Home -> DestinationBinding.Content(HomeScreen(entry))
-        is Accounts -> DestinationBinding.Content(AccountsScreen(entry))
-        is Transactions -> DestinationBinding.Content(TransactionsScreen(entry))
-        is Transaction -> DestinationBinding.Content(TransactionScreen(entry))
-        is Cards -> DestinationBinding.Content(CardsScreen(entry))
-        is Card -> DestinationBinding.Content(CardScreen(entry))
-        is AccountDetails -> DestinationBinding.Content(AccountDetailsScreen(entry))
+        is Home -> DestinationBinding.Content(HomeScreen(entry), parentInputsKey = Unit)
+        is Accounts -> DestinationBinding.Content(AccountsScreen(entry), parentInputsKey = Unit)
+        is Transactions -> DestinationBinding.Content(
+            TransactionsScreen(entry),
+            parentInputsKey = Unit,
+        )
+        is Transaction -> DestinationBinding.Content(TransactionScreen(entry), parentInputsKey = Unit)
+        is Cards -> DestinationBinding.Content(CardsScreen(entry), parentInputsKey = Unit)
+        is Card -> DestinationBinding.Content(CardScreen(entry), parentInputsKey = Unit)
+        is AccountDetails -> DestinationBinding.Content(
+            AccountDetailsScreen(entry),
+            parentInputsKey = Unit,
+        )
         is Account -> DestinationBinding.Modal(AccountBottomSheet(entry))
         else -> DestinationBinding.Unsupported(entry)
     }

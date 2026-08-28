@@ -843,7 +843,10 @@ private class EntryStateDestinationCatalog(
     private val modalProbe: EntryStateModalProbe? = null,
 ) : DestinationCatalog {
     override fun resolve(entry: BackStackEntry): DestinationBinding = when (entry.route) {
-        is ContentRoute -> DestinationBinding.Content(EntryStateScreen(entry))
+        is ContentRoute -> DestinationBinding.Content(
+            EntryStateScreen(entry),
+            parentInputsKey = Unit,
+        )
         is ModalRoute -> DestinationBinding.Modal(
             EntryStateModalScreen(
                 entry = entry,

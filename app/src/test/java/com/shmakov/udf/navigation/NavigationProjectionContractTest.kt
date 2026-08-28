@@ -128,6 +128,37 @@ class NavigationProjectionContractTest {
     }
 
     @Test
+    fun `replacing only expanded nested destination preserves exact parent and slot identity`() {
+        val home = entry("stable-home", Home)
+        val accounts = entry("nested-accounts", Accounts)
+        val transactions = entry("nested-transactions", Transactions)
+
+        val before = NavProjector.project(state(home, accounts), expandedPane)
+            .requireSuccess()
+        val after = NavProjector.project(state(home, transactions), expandedPane)
+            .requireSuccess()
+
+        assertEquals(before.root, after.root)
+        assertEquals(home, before.root.entry)
+        assertEquals(home, after.root.entry)
+        assertEquals(ContentSlotId.Root, before.root.slotId)
+        assertEquals(
+            ContentSlotId.ChildOf(home.id),
+            before.nestedSlots.single().slotId,
+        )
+        assertEquals(
+            before.nestedSlots.single().slotId,
+            after.nestedSlots.single().slotId,
+        )
+        assertEquals(accounts, before.nestedSlots.single().entry)
+        assertEquals(transactions, after.nestedSlots.single().entry)
+        assertNotEquals(
+            before.nestedSlots.single().entry.id,
+            after.nestedSlots.single().entry.id,
+        )
+    }
+
+    @Test
     fun `expanded policy resets deeper content to root after Accounts`() {
         val home = entry("home", Home)
         val accounts = entry("accounts", Accounts)
