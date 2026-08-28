@@ -370,10 +370,16 @@ GitHub Issues — единственный источник истины для 
 - JDK 17;
 - Gradle Wrapper из репозитория.
 
-Запустите конфигурацию `app` в Android Studio или выполните проверку из терминала:
+Запустите конфигурацию `app` в Android Studio или выполните основной compile-time gate из
+терминала:
 
 ```bash
-./gradlew testDebugUnitTest lintDebug assembleDebug
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 ```
+
+Полный reference navigation suite запускается на отдельном эмуляторе или устройстве. Требования,
+команды адресного и полного запуска, scenario matrix и расположение отчётов описаны в
+[`docs/DEVICE_TESTING.md`](docs/DEVICE_TESTING.md). Instrumentation-тесты являются источником
+correctness; сохранённый Maestro flow служит коротким installed-APK smoke.
 
 Перед началом работы прочитайте [CONTRIBUTING.md](CONTRIBUTING.md). Изменения navigation behavior должны сопровождаться сфокусированными тестами переходов состояния, а видимые UI-изменения — скриншотами или короткой записью.

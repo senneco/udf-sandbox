@@ -38,4 +38,4 @@ jobs:
           cache-provider: basic
 
       - name: Verify project
-        run: ./gradlew testDebugUnitTest lintDebug assembleDebug --stacktrace --warning-mode all
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --stacktrace --warning-mode all

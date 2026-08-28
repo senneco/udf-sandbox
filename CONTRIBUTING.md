@@ -22,8 +22,12 @@ GitHub Issues — единственный источник истины для 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 ./gradlew --version
-./gradlew testDebugUnitTest lintDebug assembleDebug
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 ```
+
+Для изменений, затрагивающих Android host, Compose renderer, modal UI или lifecycle, выполните
+также reference navigation suite на отдельном эмуляторе. Канонические команды, требования к AVD и
+расположение отчётов находятся в [`docs/DEVICE_TESTING.md`](docs/DEVICE_TESTING.md).
 
 ## Подход к разработке
 
@@ -39,7 +43,7 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 Перед открытием pull request:
 
 1. Укажите GitHub issue и объясните, какие acceptance criteria выполнены.
-2. Выполните `./gradlew testDebugUnitTest lintDebug assembleDebug` на JDK 17.
+2. Выполните `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest` на JDK 17.
 3. Добавьте или обновите тесты для каждого изменённого state transition или projection rule.
 4. Проверьте Android Back, быстрые повторные события и устаревшие animation callbacks, если это относится к изменению.
 5. Проверьте Activity recreation и process restoration, если это относится к изменению.

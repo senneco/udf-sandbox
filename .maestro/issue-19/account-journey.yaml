@@ -1,0 +1,22 @@
+appId: com.shmakov.udf
+name: Reference account navigation journey
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Go to Account #2"
+- back
+- assertVisible: "Accounts Screen"
+- back
+- assertVisible: "Home Screen"
+- tapOn: "Go to Accounts"
+- assertVisible: "Accounts Screen"
+- tapOn: "Go to Account 1"
+- assertVisible: "Go to details"
+- tapOn: "Go to details"
+- assertVisible: "Account Details Screen #1"
+- back
+- assertVisible: "Go to Account #2"
+- back
+- assertVisible: "Accounts Screen"
+- back
+- assertVisible: "Home Screen"

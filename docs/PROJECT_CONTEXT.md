@@ -347,7 +347,18 @@ Route, entry identity, validated `NavState`, primitive snapshot, `SavedStateHand
 Ожидаемая команда проверки репозитория:
 
 ```bash
-./gradlew testDebugUnitTest lintDebug assembleDebug
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 ```
 
-JVM contract suite запускается этой командой. Воспроизводимый scoped device gate и landscape-кадры renderer regression #13 описаны в [`docs/evidence/issue-13/README.md`](evidence/issue-13/README.md). Retained-modal и owner-placement gate #14 описан в [`docs/evidence/issue-14/README.md`](evidence/issue-14/README.md). Cancellation-safe Material convergence, exact modal Back, full instrumentation result и реальные Back/swipe кадры находятся в [`docs/evidence/issue-15/README.md`](evidence/issue-15/README.md). Recreation, primitive `Bundle`/`Parcel` restoration и modal bootstrap без replay находятся в [`docs/evidence/issue-16/README.md`](evidence/issue-16/README.md). Exact-entry `rememberSaveable`, relocation, cleanup и Activity recreation находятся в [`docs/evidence/issue-17/README.md`](evidence/issue-17/README.md).
+Команда запускает JVM contracts и компилирует instrumentation APK. Канонические требования,
+targeted/full device entrypoints, scenario matrix и отчёты описаны в
+[`docs/DEVICE_TESTING.md`](DEVICE_TESTING.md). Воспроизводимый scoped device gate и
+landscape-кадры renderer regression #13 описаны в
+[`docs/evidence/issue-13/README.md`](evidence/issue-13/README.md). Retained-modal и owner-placement
+gate #14 описан в [`docs/evidence/issue-14/README.md`](evidence/issue-14/README.md).
+Cancellation-safe Material convergence, exact modal Back, full instrumentation result и реальные
+Back/swipe кадры находятся в [`docs/evidence/issue-15/README.md`](evidence/issue-15/README.md).
+Recreation, primitive `Bundle`/`Parcel` restoration и modal bootstrap без replay находятся в
+[`docs/evidence/issue-16/README.md`](evidence/issue-16/README.md). Exact-entry `rememberSaveable`,
+relocation, cleanup и Activity recreation находятся в
+[`docs/evidence/issue-17/README.md`](evidence/issue-17/README.md).

@@ -32,11 +32,14 @@ import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
 import com.shmakov.udf.navigation.ModalEntrance
 import com.shmakov.udf.navigation.ModalScreenState
 import kotlinx.coroutines.flow.first
+
+internal const val BOTTOM_SHEET_SCRIM_TEST_TAG = "navigation:bottom-sheet:scrim"
 
 /**
  * Renders a state-authoritative standard bottom sheet for one modal presentation.
@@ -267,7 +270,9 @@ private fun Scrim(
                         onDismissRequest()
                     }
                 }
-                .clearAndSetSemantics {}
+                .clearAndSetSemantics {
+                    testTag = BOTTOM_SHEET_SCRIM_TEST_TAG
+                }
         } else {
             Modifier
         }
