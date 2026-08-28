@@ -12,10 +12,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.shmakov.udf.ModalExitCompletion
@@ -27,11 +29,13 @@ import com.shmakov.udf.NavigationPresentationPlanner
 import com.shmakov.udf.NavigationRenderTarget
 import com.shmakov.udf.PresentedModalLayer
 import com.shmakov.udf.renderIdentity
+import com.shmakov.udf.navigation.BackStackEntry
 import com.shmakov.udf.navigation.ContentSlotId
 import com.shmakov.udf.navigation.EntryId
 import com.shmakov.udf.navigation.ModalEntrance
 import com.shmakov.udf.navigation.ModalScreenState
 import com.shmakov.udf.navigation.NavAction
+import com.shmakov.udf.navigation.Screen
 
 /** Renders one atomically projected navigation revision. */
 @Composable
@@ -49,7 +53,10 @@ internal fun AnimatedNavigation(
     val modalPresentationHolder = remember { ModalPresentationHolder() }
     val physicalRendererEpoch = remember { PhysicalRendererEpoch() }
     when (val binding = DestinationTreeBinder.bind(renderTarget.tree, destinationCatalog)) {
-        is DestinationTreeBindingResult.Success -> key(physicalRendererEpoch.value) {
+        is DestinationTreeBindingResult.Success -> key(
+            physicalRendererEpoch.value,
+            destinationCatalog,
+        ) {
             PrepareBoundNavigation(
                 renderTarget = renderTarget,
                 boundTree = binding.tree,
@@ -315,11 +322,24 @@ private class BoundRenderState(
     val tree: BoundNavigationRenderTree,
     val contentMotion: NavigationContentMotion,
 ) {
-    override fun equals(other: Any?): Boolean =
-        this === other || other is BoundRenderState && renderTarget == other.renderTarget
+    private val contentIdentity = BoundContentIdentity(
+        root = tree.root.screenContentIdentity(),
+        nested = tree.nestedSlots.map { slot -> slot.screenContentIdentity() },
+    )
 
-    override fun hashCode(): Int = renderTarget.hashCode()
+    override fun equals(other: Any?): Boolean =
+        this === other ||
+            other is BoundRenderState &&
+            renderTarget == other.renderTarget &&
+            contentIdentity == other.contentIdentity
+
+    override fun hashCode(): Int = 31 * renderTarget.hashCode() + contentIdentity.hashCode()
 }
+
+private data class BoundContentIdentity(
+    val root: ScreenContentIdentity,
+    val nested: List<ScreenContentIdentity>,
+)
 
 @Composable
 private fun RenderContentSlot(
@@ -332,23 +352,30 @@ private fun RenderContentSlot(
     onExitFinished: (ModalExitToken) -> Unit,
 ) {
     val entryId = contentSlot.slot.entry.id
-    if (renderOwnership.ownsContent(branchState.renderTarget, entryId)) {
-        entryStateHost.Render(entryId) {
-            contentSlot.screen.Content(
-                childContent = {
-                    RenderChildContent(
-                        branchState = branchState,
-                        ownerContentEntryId = entryId,
-                        modalLayers = modalLayers,
-                        entryStateHost = entryStateHost,
-                        renderOwnership = renderOwnership,
-                        onNavigationAction = onNavigationAction,
-                        onExitFinished = onExitFinished,
-                    )
-                },
-                onNavigationAction = onNavigationAction,
+    val latestChildContent = rememberUpdatedState<@Composable () -> Unit> {
+        RenderChildContent(
+            branchState = branchState,
+            ownerContentEntryId = entryId,
+            modalLayers = modalLayers,
+            entryStateHost = entryStateHost,
+            renderOwnership = renderOwnership,
+            onNavigationAction = onNavigationAction,
+            onExitFinished = onExitFinished,
+        )
+    }
+    val latestNavigationAction = rememberUpdatedState(onNavigationAction)
+    val contentIdentity = contentSlot.screenContentIdentity()
+    val screenContent = remember(contentIdentity) {
+        EntryRenderContent {
+            RenderScreenContent(
+                screen = contentSlot.screen,
+                latestChildContent = latestChildContent,
+                latestNavigationAction = latestNavigationAction,
             )
         }
+    }
+    if (renderOwnership.ownsContent(branchState.renderTarget, entryId)) {
+        entryStateHost.Render(entryId, screenContent)
     }
 
     RenderModalLayers(
@@ -361,6 +388,45 @@ private fun RenderContentSlot(
         onNavigationAction = onNavigationAction,
         onExitFinished = onExitFinished,
     )
+}
+
+/** Model-defined inputs whose change must create a fresh destination content composition. */
+private data class ScreenContentIdentity(
+    val entry: BackStackEntry,
+    val screenClass: Class<out Screen>,
+    val parentInputsKey: Any?,
+)
+
+private fun BoundContentSlot.screenContentIdentity(): ScreenContentIdentity =
+    ScreenContentIdentity(
+        entry = slot.entry,
+        screenClass = screen.javaClass,
+        parentInputsKey = parentInputsKey,
+    )
+
+/** Keeps the non-restartable virtual Screen call behind one entry-local restart scope. */
+@Composable
+private fun RenderScreenContent(
+    screen: Screen,
+    latestChildContent: State<@Composable () -> Unit>,
+    latestNavigationAction: State<(NavAction) -> Unit>,
+) {
+    screen.Content(
+        childContent = {
+            RenderLatestChildContent(latestChildContent)
+        },
+        onNavigationAction = { action ->
+            latestNavigationAction.value(action)
+        },
+    )
+}
+
+/** Reads the changing renderer-owned child slot in its own restartable Compose scope. */
+@Composable
+private fun RenderLatestChildContent(
+    latestChildContent: State<@Composable () -> Unit>,
+) {
+    latestChildContent.value()
 }
 
 @Composable

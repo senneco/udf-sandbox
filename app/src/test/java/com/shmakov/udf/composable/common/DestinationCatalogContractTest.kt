@@ -54,6 +54,7 @@ class DestinationCatalogContractTest {
             )
             assertSame(expectedEntry, (binding as DestinationBinding.Content).screen.entry)
             assertEquals(expectedEntry.id, binding.screen.entry.id)
+            assertEquals(Unit, binding.parentInputsKey)
         }
 
         val modalBinding = DemoDestinationCatalog.resolve(modalEntry)
@@ -86,9 +87,11 @@ class DestinationCatalogContractTest {
         assertEquals(source.root, bound.root.slot)
         assertSame(home, bound.root.screen.entry)
         assertEquals(home.id, bound.root.screen.entry.id)
+        assertEquals(Unit, bound.root.parentInputsKey)
         assertEquals(source.nestedSlots, bound.nestedSlots.map { it.slot })
         assertSame(accounts, bound.nestedSlots.single().screen.entry)
         assertEquals(accounts.id, bound.nestedSlots.single().screen.entry.id)
+        assertEquals(Unit, bound.nestedSlots.single().parentInputsKey)
         assertEquals(source.modalLayers, bound.modalLayers.map { it.layer })
         assertSame(account, bound.modalLayers.single().screen.entry)
         assertEquals(account.id, bound.modalLayers.single().screen.entry.id)

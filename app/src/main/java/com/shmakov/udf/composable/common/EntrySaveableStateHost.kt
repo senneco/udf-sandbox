@@ -2,6 +2,7 @@ package com.shmakov.udf.composable.common
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.SaveableStateHolder
@@ -30,6 +31,15 @@ internal class EntrySaveableStateHost private constructor(
         entryId: EntryId,
         content: @Composable () -> Unit,
     ) {
+        Render(entryId, EntryRenderContent(content))
+    }
+
+    /** Invokes one already-stabilized content boundary owned by [entryId]. */
+    @Composable
+    fun Render(
+        entryId: EntryId,
+        content: EntryRenderContent,
+    ) {
         val saveableKey = entryId.value
         val host = movableHosts.getOrPut(saveableKey) {
             MovableEntryHost(
@@ -39,7 +49,7 @@ internal class EntrySaveableStateHost private constructor(
                 onInactive = ::releaseIfRetired,
             )
         }
-        host.content(EntryRenderContent(content))
+        host.content(content)
     }
 
     /** Commits the complete durable history after the corresponding render target was accepted. */
@@ -90,7 +100,8 @@ internal class EntrySaveableStateHost private constructor(
     }
 }
 
-private class EntryRenderContent(
+@Stable
+internal class EntryRenderContent(
     val content: @Composable () -> Unit,
 )
 
