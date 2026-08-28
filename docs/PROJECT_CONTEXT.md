@@ -40,6 +40,19 @@ Internal `SavedStateHandleTabNavigationStorage` проводит весь graph 
 
 Internal `TabNavigationStore` — один application-facing owner этого graph, который приложение удерживает в собственном `ViewModel`. Он принимает `SavedStateHandle`, один `RouteCodec` и lazy `TabNavigationStateFactory`. Valid restore не вызывает factory и не переписывает payload; Missing/Rejected создают ровно один whole fallback, сразу пытаются сохранить его и оставляют save result видимым в typed startup outcome. Store публикует read-only `StateFlow<TabNavigationFrame>`; revision/transition не входят в durable state и начинают каждый process-local owner с `0`/`null`. Constructor/dispatch помечены `@MainThread`, потому что composed `SavedStateHandle` имеет main-thread contract. Changed сохраняет полный graph до публикации frame и возвращает typed save result; Unchanged не пишет и сохраняет exact frame identity. Dispatch явно non-reentrant, поэтому application codec/persistence callbacks не могут применить nested action к ещё не опубликованному frame. Primary-tab, Back-at-root, deeplink, animation, retry и UI policy остаются снаружи.
 
+Internal `DemoTabNavigation` — app-side Compose sample этого owner-managed graph, не public
+navigation API. Pure `TabNavigationRenderPlanner` выбирает только selected leaf для обычного
+`NavProjector`, отдельно передаёт одному renderer-у все graph `EntryId` в tab/history order и
+материализует origin `selectedTabId + selectedTopEntryId`. Поэтому неактивные trees не компонуются,
+но их exact `rememberSaveable` buckets остаются живы; outgoing callback не читает latest frame и
+безопасно становится reducer no-op после switch или graph replacement. Matching
+`NavigationChanged` и same-tab `TabOpened` продолжают exact leaf intent. `TabSelected`, cross-tab
+open и `GraphReplaced` сбрасывают container presentation snap, включая modal layers, при этом
+monotonic modal exit generation сохраняется против ABA. Stable tab-bar model получает только
+ordered IDs, selected ID и app visuals, поэтому leaf/local updates могут skip-нуть его committed
+pass. Visual catalog не мигрирует valid старый graph: добавление tab в restored state остаётся
+явным application `ReplaceGraph`.
+
 Navigation input представлен закрытым набором typed `NavAction`, а `NavReducer.reduce(state, action)` является чистой Kotlin-функцией. Результат — `NavReduction.Changed(state, transition)` либо `NavReduction.Unchanged(state, reason)`. Action factories материализуют identity новых entries до reduction, поэтому reducer не генерирует случайные значения.
 
 `NavTransitionIntent` описывает только что совершившийся Push, Pop, branch replacement, modal dismiss или full-history replacement. Он возвращается отдельно от durable `NavState` и не попадает в snapshot. Demo-specific `AppStore` атомарно связывает immutable `AppState`, монотонную process-local `navigationRevision` и последний intent в `AppStateFrame`; `AppViewModel` удерживает store в lifecycle конкретной Activity. Revision увеличивается только при `Changed`. Renderer использует её вместе с exact intent validation, чтобы не переигрывать sticky metadata после renderer/composition recreation, layout reprojection или пропуска промежуточного frame. Navigation history сохраняется через one-key `SavedStateHandle` envelope и восстанавливается в новом owner до создания store, а revision и intent всегда начинают заново с `0`/`null`.
@@ -299,7 +312,7 @@ Route, entry identity, validated `NavState`, primitive snapshot, `SavedStateHand
 
 - Должна ли каноническая навигация остаться линейной историей или стать явным деревом?
 - Как превратить внутреннее exact-intent matching в простой application-defined animation policy API?
-- Как подключить уже owner-managed stateful tab graph к renderer и per-entry saveable state, не усложнив линейный базовый API?
+- Каким должен стать проверенный slot-based public Compose API поверх internal tab sample, не перенося в core Material visuals и app migration policy?
 - Как predictive Back интегрируется с reducer-owned navigation state?
 - Может ли Navigation Compose помочь с платформенной интеграцией, не становясь владельцем канонической истории?
 
@@ -369,3 +382,5 @@ Recreation, primitive `Bundle`/`Parcel` restoration и modal bootstrap без re
 [`docs/evidence/issue-16/README.md`](evidence/issue-16/README.md). Exact-entry `rememberSaveable`,
 relocation, cleanup и Activity recreation находятся в
 [`docs/evidence/issue-17/README.md`](evidence/issue-17/README.md).
+Stateful tabs, committed-pass isolation и portrait/landscape `A → B → A` journey находятся в
+[`docs/evidence/issue-52/README.md`](evidence/issue-52/README.md).

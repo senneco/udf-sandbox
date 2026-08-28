@@ -28,6 +28,9 @@ import com.shmakov.udf.NavigationContentMotion
 import com.shmakov.udf.NavigationPresentationPlanner
 import com.shmakov.udf.NavigationRenderTarget
 import com.shmakov.udf.PresentedModalLayer
+import com.shmakov.udf.TabNavigationActionOrigin
+import com.shmakov.udf.TabNavigationRenderModel
+import com.shmakov.udf.TabPresentationContinuity
 import com.shmakov.udf.renderIdentity
 import com.shmakov.udf.navigation.BackStackEntry
 import com.shmakov.udf.navigation.ContentSlotId
@@ -44,6 +47,53 @@ internal fun AnimatedNavigation(
     onNavigationAction: (NavAction) -> Unit,
     destinationCatalog: DestinationCatalog = DemoDestinationCatalog,
 ) {
+    OriginAwareAnimatedNavigation(
+        renderTarget = renderTarget,
+        retainedEntryIds = renderTarget.historyEntryIds,
+        actionOrigin = PhysicalNavigationActionOrigin.Linear,
+        presentationContinuity = TabPresentationContinuity.Leaf,
+        onNavigationAction = { _, action -> onNavigationAction(action) },
+        destinationCatalog = destinationCatalog,
+    )
+}
+
+/** Renders one selected tab leaf while retaining UI state for the complete tab graph. */
+@Composable
+internal fun AnimatedTabLeafNavigation(
+    model: TabNavigationRenderModel,
+    onNavigationAction: (TabNavigationActionOrigin, NavAction) -> Unit,
+    destinationCatalog: DestinationCatalog = DemoDestinationCatalog,
+) {
+    OriginAwareAnimatedNavigation(
+        renderTarget = model.selectedLeaf,
+        retainedEntryIds = model.retainedEntryIds,
+        actionOrigin = PhysicalNavigationActionOrigin.Tab(model.actionOrigin),
+        presentationContinuity = model.presentationContinuity,
+        onNavigationAction = { origin, action ->
+            val tabOrigin = checkNotNull(origin as? PhysicalNavigationActionOrigin.Tab) {
+                "Tab leaf renderer received a non-tab action origin"
+            }
+            onNavigationAction(tabOrigin.value, action)
+        },
+        destinationCatalog = destinationCatalog,
+    )
+}
+
+@Composable
+private fun OriginAwareAnimatedNavigation(
+    renderTarget: NavigationRenderTarget,
+    retainedEntryIds: List<EntryId>,
+    actionOrigin: PhysicalNavigationActionOrigin,
+    presentationContinuity: TabPresentationContinuity,
+    onNavigationAction: (PhysicalNavigationActionOrigin, NavAction) -> Unit,
+    destinationCatalog: DestinationCatalog,
+) {
+    require(retainedEntryIds.containsAll(renderTarget.historyEntryIds)) {
+        "retainedEntryIds must contain every rendered history entry"
+    }
+    require(retainedEntryIds.toSet().size == retainedEntryIds.size) {
+        "retainedEntryIds must not contain duplicates"
+    }
     val entryStateHost = EntrySaveableStateHost.remember()
     // These holders intentionally survive a typed destination-binding failure. Only a completely
     // bound target is accepted below, so recovery can reuse the previous entry state and motion
@@ -65,6 +115,9 @@ internal fun AnimatedNavigation(
                 renderOwnershipHolder = renderOwnershipHolder,
                 modalPresentationHolder = modalPresentationHolder,
                 physicalRendererEpoch = physicalRendererEpoch,
+                retainedEntryIds = retainedEntryIds,
+                actionOrigin = actionOrigin,
+                presentationContinuity = presentationContinuity,
                 onNavigationAction = onNavigationAction,
             )
         }
@@ -74,6 +127,14 @@ internal fun AnimatedNavigation(
             MarkPhysicalRendererGap(physicalRendererEpoch)
         }
     }
+}
+
+internal sealed class PhysicalNavigationActionOrigin {
+    object Linear : PhysicalNavigationActionOrigin()
+
+    data class Tab(
+        val value: TabNavigationActionOrigin,
+    ) : PhysicalNavigationActionOrigin()
 }
 
 /**
@@ -90,19 +151,31 @@ private fun PrepareBoundNavigation(
     renderOwnershipHolder: EntryRenderOwnershipHolder,
     modalPresentationHolder: ModalPresentationHolder,
     physicalRendererEpoch: PhysicalRendererEpoch,
-    onNavigationAction: (NavAction) -> Unit,
+    retainedEntryIds: List<EntryId>,
+    actionOrigin: PhysicalNavigationActionOrigin,
+    presentationContinuity: TabPresentationContinuity,
+    onNavigationAction: (PhysicalNavigationActionOrigin, NavAction) -> Unit,
 ) {
     val previousModalPresentation = modalPresentationHolder.accepted
-    val candidateModalState = if (previousModalPresentation == null) {
-        ModalPresentationPlanner.start(
+    val desiredModalLayers = boundTree.modalLayers.map { layer -> layer.layer }
+    val candidateModalState = when {
+        previousModalPresentation == null -> ModalPresentationPlanner.start(
             navigationRevision = renderTarget.navigationRevision,
-            desired = boundTree.modalLayers.map { layer -> layer.layer },
+            desired = desiredModalLayers,
         )
-    } else {
-        ModalPresentationPlanner.reconcile(
+
+        presentationContinuity == TabPresentationContinuity.ResetContainer &&
+            acceptedTargetHolder.target?.navigationRevision != renderTarget.navigationRevision ->
+            ModalPresentationPlanner.snap(
+                previous = previousModalPresentation.state,
+                navigationRevision = renderTarget.navigationRevision,
+                desired = desiredModalLayers,
+            )
+
+        else -> ModalPresentationPlanner.reconcile(
             previous = previousModalPresentation.state,
             navigationRevision = renderTarget.navigationRevision,
-            desired = boundTree.modalLayers.map { layer -> layer.layer },
+            desired = desiredModalLayers,
         ).state
     }
     when (
@@ -110,6 +183,7 @@ private fun PrepareBoundNavigation(
             layers = candidateModalState.layers,
             desiredLayers = boundTree.modalLayers,
             acceptedLayers = previousModalPresentation?.layers.orEmpty(),
+            desiredActionOrigin = actionOrigin,
         )
     ) {
         is PresentedModalLayersBindingResult.Success -> RenderMaterializedNavigation(
@@ -122,6 +196,8 @@ private fun PrepareBoundNavigation(
             renderOwnershipHolder = renderOwnershipHolder,
             modalPresentationHolder = modalPresentationHolder,
             physicalRendererEpoch = physicalRendererEpoch,
+            retainedEntryIds = retainedEntryIds,
+            actionOrigin = actionOrigin,
             onNavigationAction = onNavigationAction,
         )
 
@@ -143,7 +219,9 @@ private fun RenderMaterializedNavigation(
     renderOwnershipHolder: EntryRenderOwnershipHolder,
     modalPresentationHolder: ModalPresentationHolder,
     physicalRendererEpoch: PhysicalRendererEpoch,
-    onNavigationAction: (NavAction) -> Unit,
+    retainedEntryIds: List<EntryId>,
+    actionOrigin: PhysicalNavigationActionOrigin,
+    onNavigationAction: (PhysicalNavigationActionOrigin, NavAction) -> Unit,
 ) {
     // Accepted-target motion metadata belongs only to this renderer composition. Unlike entry UI
     // state, it is deliberately not saveable or store-owned, so recreation cannot replay motion.
@@ -155,6 +233,7 @@ private fun RenderMaterializedNavigation(
         renderTarget = renderTarget,
         tree = boundTree,
         contentMotion = contentMotion,
+        actionOrigin = actionOrigin,
     )
     val transition = androidx.compose.animation.core.updateTransition(
         targetState = targetState,
@@ -178,7 +257,7 @@ private fun RenderMaterializedNavigation(
             physicalRendererEpoch = physicalRendererEpoch.value,
         )
         modalPresentationHolder.accept(candidateModalPresentation)
-        entryStateHost.accept(renderTarget.historyEntryIds)
+        entryStateHost.accept(retainedEntryIds)
     }
 
     transition.AnimatedContent(
@@ -203,7 +282,7 @@ private fun RenderNavigationBranch(
     modalLayers: List<BoundPresentedModalLayer>,
     entryStateHost: EntrySaveableStateHost,
     renderOwnership: EntryRenderOwnership,
-    onNavigationAction: (NavAction) -> Unit,
+    onNavigationAction: (PhysicalNavigationActionOrigin, NavAction) -> Unit,
     onExitFinished: (ModalExitToken) -> Unit,
 ) {
     RenderContentSlot(
@@ -321,6 +400,7 @@ private class BoundRenderState(
     val renderTarget: NavigationRenderTarget,
     val tree: BoundNavigationRenderTree,
     val contentMotion: NavigationContentMotion,
+    val actionOrigin: PhysicalNavigationActionOrigin,
 ) {
     private val contentIdentity = BoundContentIdentity(
         root = tree.root.screenContentIdentity(),
@@ -331,9 +411,15 @@ private class BoundRenderState(
         this === other ||
             other is BoundRenderState &&
             renderTarget == other.renderTarget &&
-            contentIdentity == other.contentIdentity
+            contentIdentity == other.contentIdentity &&
+            actionOrigin == other.actionOrigin
 
-    override fun hashCode(): Int = 31 * renderTarget.hashCode() + contentIdentity.hashCode()
+    override fun hashCode(): Int {
+        var result = renderTarget.hashCode()
+        result = 31 * result + contentIdentity.hashCode()
+        result = 31 * result + actionOrigin.hashCode()
+        return result
+    }
 }
 
 private data class BoundContentIdentity(
@@ -348,7 +434,7 @@ private fun RenderContentSlot(
     modalLayers: List<BoundPresentedModalLayer>,
     entryStateHost: EntrySaveableStateHost,
     renderOwnership: EntryRenderOwnership,
-    onNavigationAction: (NavAction) -> Unit,
+    onNavigationAction: (PhysicalNavigationActionOrigin, NavAction) -> Unit,
     onExitFinished: (ModalExitToken) -> Unit,
 ) {
     val entryId = contentSlot.slot.entry.id
@@ -364,6 +450,10 @@ private fun RenderContentSlot(
         )
     }
     val latestNavigationAction = rememberUpdatedState(onNavigationAction)
+    // The physical content identity belongs to the entry, not to the current top-of-stack guard.
+    // A stable parent's callback must see the newest origin without restarting its Content, while
+    // an outgoing transition branch keeps a separate State and therefore its historical origin.
+    val latestActionOrigin = rememberUpdatedState(branchState.actionOrigin)
     val contentIdentity = contentSlot.screenContentIdentity()
     val screenContent = remember(contentIdentity) {
         EntryRenderContent {
@@ -371,6 +461,7 @@ private fun RenderContentSlot(
                 screen = contentSlot.screen,
                 latestChildContent = latestChildContent,
                 latestNavigationAction = latestNavigationAction,
+                latestActionOrigin = latestActionOrigin,
             )
         }
     }
@@ -409,14 +500,15 @@ private fun BoundContentSlot.screenContentIdentity(): ScreenContentIdentity =
 private fun RenderScreenContent(
     screen: Screen,
     latestChildContent: State<@Composable () -> Unit>,
-    latestNavigationAction: State<(NavAction) -> Unit>,
+    latestNavigationAction: State<(PhysicalNavigationActionOrigin, NavAction) -> Unit>,
+    latestActionOrigin: State<PhysicalNavigationActionOrigin>,
 ) {
     screen.Content(
         childContent = {
             RenderLatestChildContent(latestChildContent)
         },
         onNavigationAction = { action ->
-            latestNavigationAction.value(action)
+            latestNavigationAction.value(latestActionOrigin.value, action)
         },
     )
 }
@@ -436,7 +528,7 @@ private fun RenderChildContent(
     modalLayers: List<BoundPresentedModalLayer>,
     entryStateHost: EntrySaveableStateHost,
     renderOwnership: EntryRenderOwnership,
-    onNavigationAction: (NavAction) -> Unit,
+    onNavigationAction: (PhysicalNavigationActionOrigin, NavAction) -> Unit,
     onExitFinished: (ModalExitToken) -> Unit,
 ) {
     val transition = androidx.compose.animation.core.updateTransition(
@@ -484,11 +576,12 @@ private fun RenderModalLayers(
     modalLayers: List<BoundPresentedModalLayer>,
     entryStateHost: EntrySaveableStateHost,
     renderOwnership: EntryRenderOwnership,
-    onNavigationAction: (NavAction) -> Unit,
+    onNavigationAction: (PhysicalNavigationActionOrigin, NavAction) -> Unit,
     onExitFinished: (ModalExitToken) -> Unit,
 ) {
     modalLayers.forEach { modalLayer ->
         val presentation = modalLayer.presentation
+        val actionOrigin = modalLayer.actionOrigin
         val entryId = presentation.layer.entry.id
         val exitToken = (presentation as? PresentedModalLayer.Exiting)?.token
         if (
@@ -517,7 +610,10 @@ private fun RenderModalLayers(
                         },
                         onDismissRequest = {
                             if (presentation is PresentedModalLayer.Desired) {
-                                onNavigationAction(NavAction.dismissModal(entryId))
+                                onNavigationAction(
+                                    actionOrigin,
+                                    NavAction.dismissModal(entryId),
+                                )
                             }
                         },
                         onExitFinished = {
@@ -525,7 +621,9 @@ private fun RenderModalLayers(
                                 onExitFinished(exitToken)
                             }
                         },
-                        onNavigationAction = onNavigationAction,
+                        onNavigationAction = { action ->
+                            onNavigationAction(actionOrigin, action)
+                        },
                     )
                 }
             }

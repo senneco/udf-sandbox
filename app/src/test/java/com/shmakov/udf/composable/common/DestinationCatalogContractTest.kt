@@ -2,6 +2,7 @@ package com.shmakov.udf.composable.common
 
 import com.shmakov.udf.ModalExitToken
 import com.shmakov.udf.PresentedModalLayer
+import com.shmakov.udf.TabNavigationActionOrigin
 import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.AccountDetails
 import com.shmakov.udf.navigation.Accounts
@@ -22,6 +23,7 @@ import com.shmakov.udf.navigation.NavStateCreationResult
 import com.shmakov.udf.navigation.NavigationLayoutPolicy
 import com.shmakov.udf.navigation.NavigationRenderTree
 import com.shmakov.udf.navigation.Route
+import com.shmakov.udf.navigation.TabId
 import com.shmakov.udf.navigation.Transaction
 import com.shmakov.udf.navigation.Transactions
 import org.junit.Assert.assertEquals
@@ -205,18 +207,22 @@ class DestinationCatalogContractTest {
             ),
             acceptedLayers = listOf(
                 BoundPresentedModalLayer(
-                    PresentedModalLayer.Desired(a, ModalEntrance.Snap),
-                    previousAScreen,
+                    presentation = PresentedModalLayer.Desired(a, ModalEntrance.Snap),
+                    screen = previousAScreen,
+                    actionOrigin = origin("previous-a", a.entry.id),
                 ),
                 BoundPresentedModalLayer(
-                    PresentedModalLayer.Desired(b, ModalEntrance.Snap),
-                    previousBScreen,
+                    presentation = PresentedModalLayer.Desired(b, ModalEntrance.Snap),
+                    screen = previousBScreen,
+                    actionOrigin = origin("previous-b", b.entry.id),
                 ),
                 BoundPresentedModalLayer(
-                    PresentedModalLayer.Desired(c, ModalEntrance.Snap),
-                    previousCScreen,
+                    presentation = PresentedModalLayer.Desired(c, ModalEntrance.Snap),
+                    screen = previousCScreen,
+                    actionOrigin = origin("previous-c", c.entry.id),
                 ),
             ),
+            desiredActionOrigin = origin("current", d.entry.id),
         )
 
         assertTrue("Expected Success, got $result", result is PresentedModalLayersBindingResult.Success)
@@ -226,6 +232,62 @@ class DestinationCatalogContractTest {
         assertSame(currentDScreen, layers[1].screen)
         assertSame(previousAScreen, layers[2].screen)
         assertSame(previousBScreen, layers[3].screen)
+    }
+
+    @Test
+    fun `desired presentation receives the current physical action origin`() {
+        val desired = modalLayer("desired-origin", accountId = 5)
+        val currentScreen = modalScreen(desired)
+        val acceptedScreen = modalScreen(desired)
+        val acceptedOrigin = origin("accepted", desired.entry.id)
+        val currentOrigin = origin("current", desired.entry.id)
+        val presentation = PresentedModalLayer.Desired(desired, ModalEntrance.Snap)
+
+        val result = DestinationTreeBinder.materializePresentedModalLayers(
+            layers = listOf(presentation),
+            desiredLayers = listOf(BoundModalLayer(desired, currentScreen)),
+            acceptedLayers = listOf(
+                BoundPresentedModalLayer(
+                    presentation = presentation,
+                    screen = acceptedScreen,
+                    actionOrigin = acceptedOrigin,
+                ),
+            ),
+            desiredActionOrigin = currentOrigin,
+        ) as PresentedModalLayersBindingResult.Success
+
+        assertSame(currentScreen, result.layers.single().screen)
+        assertSame(currentOrigin, result.layers.single().actionOrigin)
+    }
+
+    @Test
+    fun `exiting presentation preserves the accepted physical action origin`() {
+        val exiting = modalLayer("exiting-origin", accountId = 6)
+        val currentScreen = modalScreen(exiting)
+        val acceptedScreen = modalScreen(exiting)
+        val acceptedOrigin = origin("accepted", exiting.entry.id)
+        val currentOrigin = origin("current", EntryId("current-top"))
+        val acceptedPresentation = PresentedModalLayer.Desired(exiting, ModalEntrance.Snap)
+        val exitingPresentation = PresentedModalLayer.Exiting(
+            layer = exiting,
+            token = ModalExitToken(exiting.entry.id, generation = 1),
+        )
+
+        val result = DestinationTreeBinder.materializePresentedModalLayers(
+            layers = listOf(exitingPresentation),
+            desiredLayers = listOf(BoundModalLayer(exiting, currentScreen)),
+            acceptedLayers = listOf(
+                BoundPresentedModalLayer(
+                    presentation = acceptedPresentation,
+                    screen = acceptedScreen,
+                    actionOrigin = acceptedOrigin,
+                ),
+            ),
+            desiredActionOrigin = currentOrigin,
+        ) as PresentedModalLayersBindingResult.Success
+
+        assertSame(acceptedScreen, result.layers.single().screen)
+        assertSame(acceptedOrigin, result.layers.single().actionOrigin)
     }
 
     @Test
@@ -244,10 +306,15 @@ class DestinationCatalogContractTest {
                 desiredLayers = emptyList(),
                 acceptedLayers = listOf(
                     BoundPresentedModalLayer(
-                        PresentedModalLayer.Desired(desired, ModalEntrance.Snap),
-                        acceptedScreen,
+                        presentation = PresentedModalLayer.Desired(
+                            desired,
+                            ModalEntrance.Snap,
+                        ),
+                        screen = acceptedScreen,
+                        actionOrigin = origin("accepted", desired.entry.id),
                     ),
                 ),
+                desiredActionOrigin = origin("current", desired.entry.id),
             ),
         )
     }
@@ -269,6 +336,7 @@ class DestinationCatalogContractTest {
                 layers = listOf(presentation),
                 desiredLayers = listOf(BoundModalLayer(exiting, currentScreen)),
                 acceptedLayers = emptyList(),
+                desiredActionOrigin = origin("current", exiting.entry.id),
             ),
         )
     }
@@ -284,6 +352,7 @@ class DestinationCatalogContractTest {
             layers = sourcePresentations,
             desiredLayers = sourceDesired,
             acceptedLayers = emptyList(),
+            desiredActionOrigin = origin("current", desired.entry.id),
         ) as PresentedModalLayersBindingResult.Success
         sourcePresentations.clear()
         sourceDesired.clear()
@@ -323,6 +392,14 @@ class DestinationCatalogContractTest {
 
     private fun modalScreen(layer: ModalLayer): ModalScreen =
         (DemoDestinationCatalog.resolve(layer.entry) as DestinationBinding.Modal).screen
+
+    private fun origin(tabId: String, topEntryId: EntryId): PhysicalNavigationActionOrigin =
+        PhysicalNavigationActionOrigin.Tab(
+            TabNavigationActionOrigin(
+                tabId = TabId(tabId),
+                topEntryId = topEntryId,
+            ),
+        )
 
     private object CustomContent : ContentRoute
 

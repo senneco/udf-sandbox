@@ -231,6 +231,24 @@ internal object ModalPresentationPlanner {
         return ModalPresentationPlan.Ready(state)
     }
 
+    /**
+     * Starts a new physical container presentation without retaining exits from the old one.
+     *
+     * Unlike [start], this preserves the monotonic exit generation so a late completion callback
+     * from the replaced container can never match a future exit token for a reused entry ID.
+     */
+    fun snap(
+        previous: ModalPresentationState,
+        navigationRevision: Long,
+        desired: List<ModalLayer>,
+    ): ModalPresentationState {
+        desired.requireUniqueModalEntryIds()
+        return previous.snapTo(
+            navigationRevision = navigationRevision,
+            desired = desired,
+        )
+    }
+
     fun completeExit(
         previous: ModalPresentationState,
         token: ModalExitToken,

@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">UDF</string>
+    <string name="demo_tab_accounts">Accounts</string>
+    <string name="demo_tab_cards">Cards</string>
 </resources>
