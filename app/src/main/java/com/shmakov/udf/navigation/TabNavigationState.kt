@@ -72,6 +72,10 @@ class TabNavigationState private constructor(
     /** Returns the tab with [tabId], or `null` when it does not belong to this graph. */
     operator fun get(tabId: TabId): TabState? = tabs.firstOrNull { it.id == tabId }
 
+    /** Encodes the selected tab and every ordered leaf history without Android or UI data. */
+    fun toSnapshot(codec: RouteCodec): TabNavigationSnapshotResult<TabNavigationStateSnapshot> =
+        snapshotTabNavigationState(this, codec)
+
     override fun equals(other: Any?): Boolean =
         this === other ||
             other is TabNavigationState &&
@@ -114,6 +118,14 @@ class TabNavigationState private constructor(
                 )
             }
         }
+
+        /** Restores the complete graph and reuses every leaf and graph invariant validator. */
+        @JvmStatic
+        fun restore(
+            snapshot: TabNavigationStateSnapshot,
+            codec: RouteCodec,
+        ): TabNavigationSnapshotResult<TabNavigationState> =
+            restoreTabNavigationState(snapshot, codec)
     }
 }
 

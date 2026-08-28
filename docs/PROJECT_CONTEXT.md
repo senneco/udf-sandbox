@@ -30,9 +30,11 @@
 
 ## Текущая модель
 
-`AppState` содержит `NavState`, а `NavState` — непустой список `BackStackEntry(id, route)`. Route описывает semantic target и arguments, а entry ID — конкретное появление route в истории. Модель проверяет content-root, однозначный content/modal kind и уникальность IDs.
+`AppState` пока содержит один `NavState`, а `NavState` — непустой список `BackStackEntry(id, route)`. Route описывает semantic target и arguments, а entry ID — конкретное появление route в истории. Модель проверяет content-root, однозначный content/modal kind и уникальность IDs.
 
 Открытые `ContentRoute` и `ModalRoute` позволяют приложению объявлять собственные routes. Versioned primitive snapshot отделён от route objects; приложение подключает их через `RouteCodec`, а восстановление всегда повторно использует validation `NavState`.
+
+`TabNavigationState` — следующий pure composition layer: ordered list хранит стабильные `TabId`, отдельный non-empty `NavState` каждого tab и выбранный tab, а validator обеспечивает graph-wide уникальность `EntryId`. `TabReducer` разделяет container actions и exact leaf navigation, оставляет inactive histories теми же instances и поддерживает атомарные `OpenTab`/`ReplaceGraph`. `TabNavigationStateSnapshot` композиционно сохраняет selected tab, порядок tabs и каждый leaf `NavStateSnapshot` через один application `RouteCodec`; nested problems получают tab index/ID, а итоговый graph повторно проходит `TabNavigationState.fromTabs`. Graph использует отдельные `TabNavigationSnapshotResult`/`TabNavigationSnapshotProblem`, поэтому composition-specific diagnostics не расширяют sealed leaf `SnapshotProblem`. Outer, leaf и route payload versions независимы. Snapshot не содержит transition metadata и сам по себе ещё не является Android lifecycle evidence.
 
 Navigation input представлен закрытым набором typed `NavAction`, а `NavReducer.reduce(state, action)` является чистой Kotlin-функцией. Результат — `NavReduction.Changed(state, transition)` либо `NavReduction.Unchanged(state, reason)`. Action factories материализуют identity новых entries до reduction, поэтому reducer не генерирует случайные значения.
 
@@ -293,7 +295,7 @@ Route, entry identity, validated `NavState`, primitive snapshot, `SavedStateHand
 
 - Должна ли каноническая навигация остаться линейной историей или стать явным деревом?
 - Как превратить внутреннее exact-intent matching в простой application-defined animation policy API?
-- Как обобщить stateful tab graph с независимыми histories, не усложнив линейный базовый API?
+- Как встроить уже выделенный stateful tab graph в store/renderer и per-entry saveable state, не усложнив линейный базовый API?
 - Как predictive Back интегрируется с reducer-owned navigation state?
 - Может ли Navigation Compose помочь с платформенной интеграцией, не становясь владельцем канонической истории?
 

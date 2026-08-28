@@ -23,7 +23,9 @@ Navigation as state имеет смысл, только если модель н
 
 ## Основная идея
 
-Текущий navigation core хранит линейный `NavState.entries`. Каждый `BackStackEntry` содержит стабильный `EntryId` и semantic `Route`, поэтому два появления одного route остаются независимыми. Content- и modal-routes участвуют в одной истории, а чистый `NavProjector` преобразует её и явную `NavigationLayoutPolicy` в immutable `NavigationRenderTree`.
+Базовая единица navigation core — линейный `NavState.entries`. Каждый `BackStackEntry` содержит стабильный `EntryId` и semantic `Route`, поэтому два появления одного route остаются независимыми. Content- и modal-routes участвуют в одной истории, а чистый `NavProjector` преобразует её и явную `NavigationLayoutPolicy` в immutable `NavigationRenderTree`.
+
+Композиционный `TabNavigationState` добавляет ordered tab container поверх этих histories: он явно хранит выбранный `TabId`, отдельный валидный `NavState` каждого tab и graph-wide уникальность `EntryId`. Typed `TabReducer` переключает container, делегирует exact action выбранной history и атомарно заменяет tab/весь graph. Никакого скрытого `NavController` state у модели нет.
 
 Например, один и тот же state рендерится по-разному без изменения navigation history:
 
@@ -57,6 +59,7 @@ Navigation core уже содержит валидируемую entry model, с
 - semantic routes и независимую identity каждого back-stack entry;
 - непустой stack с content-root и уникальными entry IDs;
 - versioned snapshot и расширяемый route codec без Android/Compose dependencies;
+- immutable ordered tab graph, typed container/leaf actions и versioned snapshot всего graph;
 - typed push, pop, branch replacement, exact-ID modal dismiss и полную замену history;
 - чистый reducer с явными `Changed`/`Unchanged` outcomes;
 - transient transition intent, который не попадает в `NavState` или snapshot;
@@ -94,6 +97,28 @@ val snapshot = state.toSnapshot(DemoRouteCodec)
 ```
 
 Обычный код отдаёт генерацию identity фабрикам, а restoration и deep links могут передать заранее известные IDs через `NavState.fromEntries(...)`. Пользовательские routes реализуют ровно один из открытых интерфейсов `ContentRoute` или `ModalRoute` и подключают собственный `RouteCodec`.
+
+Tab graph использует тот же leaf API и тот же application-owned codec:
+
+```kotlin
+val graph = TabNavigationState.create(
+    selectedTabId = accounts.id,
+    tabs = listOf(accounts, cards),
+)
+
+when (val snapshotResult = graph.toSnapshot(routeCodec)) {
+    is TabNavigationSnapshotResult.Success ->
+        when (val restoreResult = TabNavigationState.restore(snapshotResult.value, routeCodec)) {
+            is TabNavigationSnapshotResult.Success -> useGraph(restoreResult.value)
+            is TabNavigationSnapshotResult.Failure ->
+                reportSnapshotProblems(restoreResult.problems)
+        }
+    is TabNavigationSnapshotResult.Failure ->
+        reportSnapshotProblems(snapshotResult.problems)
+}
+```
+
+Primitive `TabNavigationStateSnapshot` сохраняет selected tab, точный порядок tab-ов, все histories и exact IDs. `TabNavigationSnapshotResult` и `TabNavigationSnapshotProblem` отделены от leaf-result обычного `NavState`, поэтому новые graph diagnostics не добавляют невозможные ветви в leaf API. Он не содержит labels/icons, transition intent, animation, revision или Compose state. Это DTO, а не готовый `Bundle`/JSON transport: lifecycle/store интеграция всего graph будет отдельным этапом и только она сможет доказать recreation/process restoration.
 
 ## Чистая layout projection
 
