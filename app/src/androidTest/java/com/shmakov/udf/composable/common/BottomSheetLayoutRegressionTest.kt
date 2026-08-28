@@ -14,7 +14,6 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -376,7 +375,8 @@ class BottomSheetLayoutRegressionTest {
                         Box(
                             Modifier
                                 .fillMaxWidth()
-                                .height(160.dp),
+                                .height(160.dp)
+                                .testTag(SHEET_TAG),
                         )
                     }
                 }
@@ -388,10 +388,7 @@ class BottomSheetLayoutRegressionTest {
         assertEquals(0, dismissRequestCount)
         assertEquals(0, exitFinishedCount)
 
-        // The sheet is bottom-aligned and 160dp tall; the root's top-left is stable scrim space.
-        composeRule.onRoot(useUnmergedTree = true).performTouchInput {
-            click(Offset(x = 1f, y = 1f))
-        }
+        tapVisibleScrim()
 
         assertEquals(1, dismissRequestCount)
         assertEquals(0, exitFinishedCount)
@@ -499,9 +496,7 @@ class BottomSheetLayoutRegressionTest {
         composeRule.mainClock.advanceTimeBy(SHEET_ANIMATION_SETTLE_MILLIS)
         composeRule.waitForIdle()
 
-        composeRule.onRoot(useUnmergedTree = true).performTouchInput {
-            click(Offset(x = 1f, y = 1f))
-        }
+        tapVisibleScrim()
         assertEquals(1, dismissRequestCount)
         assertEquals(ModalScreenState.Shown, targetState.value)
 
@@ -535,9 +530,7 @@ class BottomSheetLayoutRegressionTest {
         }
         composeRule.mainClock.advanceTimeBy(SHEET_ANIMATION_SETTLE_MILLIS)
         composeRule.waitForIdle()
-        composeRule.onRoot(useUnmergedTree = true).performTouchInput {
-            click(Offset(x = 1f, y = 1f))
-        }
+        tapVisibleScrim()
 
         assertEquals(2, dismissRequestCount)
         assertEquals(1, exitFinishedCount)
@@ -820,6 +813,7 @@ class BottomSheetLayoutRegressionTest {
                         Modifier
                             .fillMaxWidth()
                             .height(sheetHeight.value)
+                            .testTag(SHEET_TAG)
                             .onGloballyPositioned { coordinates ->
                                 sheetHeightPx = coordinates.size.height
                                 sheetTopPx = coordinates.positionInRoot().y
@@ -872,9 +866,7 @@ class BottomSheetLayoutRegressionTest {
         assertEquals(0, exitFinishedCount)
 
         // Once Expanded is accepted again, a real interaction still owns the one request slot.
-        composeRule.onRoot(useUnmergedTree = true).performTouchInput {
-            click(Offset(x = 1f, y = 1f))
-        }
+        tapVisibleScrim()
         assertEquals(1, dismissRequestCount)
         assertEquals(0, exitFinishedCount)
     }
@@ -894,6 +886,25 @@ class BottomSheetLayoutRegressionTest {
             composeRule.mainClock.advanceTimeByFrame()
         }
         return predicate()
+    }
+
+    private fun tapVisibleScrim() {
+        val scrim = composeRule.onNodeWithTag(
+            BOTTOM_SHEET_SCRIM_TEST_TAG,
+            useUnmergedTree = true,
+        )
+        val scrimBounds = scrim.fetchSemanticsNode().boundsInRoot
+        val sheetTop = composeRule.onNodeWithTag(SHEET_TAG, useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.top
+        val exposedScrimHeight = sheetTop - scrimBounds.top
+        assertTrue(
+            "Sheet covers the whole scrim: scrim=$scrimBounds, sheetTop=$sheetTop",
+            exposedScrimHeight > 1f,
+        )
+
+        scrim.performTouchInput {
+            click(Offset(scrimBounds.width / 2f, exposedScrimHeight / 2f))
+        }
     }
 
     private fun awaitStableExpandedTop(
