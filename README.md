@@ -60,6 +60,7 @@ Navigation core уже содержит валидируемую entry model, с
 - непустой stack с content-root и уникальными entry IDs;
 - versioned snapshot и расширяемый route codec без Android/Compose dependencies;
 - immutable ordered tab graph, typed container/leaf actions и versioned snapshot всего graph;
+- one-key `SavedStateHandle` storage всего tab graph с отдельным versioned envelope;
 - typed push, pop, branch replacement, exact-ID modal dismiss и полную замену history;
 - чистый reducer с явными `Changed`/`Unchanged` outcomes;
 - transient transition intent, который не попадает в `NavState` или snapshot;
@@ -118,7 +119,9 @@ when (val snapshotResult = graph.toSnapshot(routeCodec)) {
 }
 ```
 
-Primitive `TabNavigationStateSnapshot` сохраняет selected tab, точный порядок tab-ов, все histories и exact IDs. `TabNavigationSnapshotResult` и `TabNavigationSnapshotProblem` отделены от leaf-result обычного `NavState`, поэтому новые graph diagnostics не добавляют невозможные ветви в leaf API. Он не содержит labels/icons, transition intent, animation, revision или Compose state. Это DTO, а не готовый `Bundle`/JSON transport: lifecycle/store интеграция всего graph будет отдельным этапом и только она сможет доказать recreation/process restoration.
+Primitive `TabNavigationStateSnapshot` сохраняет selected tab, точный порядок tab-ов, все histories и exact IDs. `TabNavigationSnapshotResult` и `TabNavigationSnapshotProblem` отделены от leaf-result обычного `NavState`, поэтому новые graph diagnostics не добавляют невозможные ветви в leaf API. Snapshot не содержит labels/icons, transition intent, animation, revision или Compose state.
+
+Внутренний `SavedStateHandleTabNavigationStorage` оборачивает DTO в один defensive `ArrayList<String>` под отдельным key. Outer envelope хранит selected tab и ordered tab segments; каждый segment — полный length-prefixed payload существующего leaf-envelope, поэтому версии graph transport, graph snapshot, leaf transport, leaf snapshot и route payload не смешиваются. Storage принимает application-owned `RouteCodec`, возвращает typed `Missing`/`Restored`/`Rejected`, очищает только свой stale key и никогда не выбирает fallback. Это ещё не observable state owner и не доказательство Activity recreation/process death — owner/frame policy остаётся следующим этапом.
 
 ## Чистая layout projection
 
@@ -359,6 +362,8 @@ setContent {
 
 `SavedNavigationStateStore` хранит под одним private key ровно одно атомарное значение `ArrayList<String>`. Versioned envelope содержит magic, версии envelope и snapshot, counts, точные entry IDs, route types и отсортированные пары route arguments. При чтении envelope сначала декодируется, затем проходит обычные `DemoRouteCodec` и `NavState.restore`, поэтому empty/non-content root, duplicate IDs, неизвестный route и устаревшая версия не обходят инварианты модели.
 
+Параллельный internal tab-storage использует другой key и magic, не меняя linear payload. Он сохраняет весь `TabNavigationState` одним присваиванием и восстанавливает graph только после outer decode, всех leaf decodes и полного `TabNavigationState.restore`. Повреждение любой history отклоняет весь graph; partial restoration отдельных tab-ов отсутствует.
+
 `AppViewModel` восстанавливает history до создания store. Отсутствующий payload, повреждённый envelope и несовместимый snapshot приводят к полной fallback-history без частичного восстановления; stale value удаляется, а выбранная fallback-history немедленно записывается обратно как canonical payload. Валидный payload восстанавливает те же routes, arguments и entry IDs. И свежий, и восстановленный owner начинают с `AppStateFrame(revision = 0, intent = null)`: process-local revision, transition intent, retained modal state и animation progress не сохраняются.
 
 `dispatch` всегда применяет action к последнему committed state под одной короткой критической секцией. Для `Changed` store вызывает persistence следующего `NavState` до публикации единого frame и увеличения revision; typed save failure не отменяет валидный in-memory transition, но не оставляет старый payload каноническим. `Unchanged` не пишет в `SavedStateHandle` и сохраняет тот же frame instance. Transition — process-local metadata текущего frame, sticky до следующего `Changed`; он не является pending event и не восстанавливается из snapshot. Поэтому initial/restored render, renderer/composition recreation, layout-only reprojection и пропуск промежуточного frame не переигрывают старый push, pop или dismiss.
@@ -369,6 +374,7 @@ Pure JVM contracts проверяют wire format, validation/fallback, save-bef
 
 - [`AppState.kt`](app/src/main/java/com/shmakov/udf/AppState.kt), [`AppStore.kt`](app/src/main/java/com/shmakov/udf/AppStore.kt) и [`AppViewModel.kt`](app/src/main/java/com/shmakov/udf/AppViewModel.kt) — immutable application state, persist-before-frame store и Activity-scoped lifecycle owner.
 - [`NavigationSnapshotEnvelope.kt`](app/src/main/java/com/shmakov/udf/NavigationSnapshotEnvelope.kt) и [`SavedNavigationStateStore.kt`](app/src/main/java/com/shmakov/udf/SavedNavigationStateStore.kt) — one-key Bundle-safe wire format и typed `SavedStateHandle` restoration boundary.
+- [`TabNavigationSnapshotEnvelope.kt`](app/src/main/java/com/shmakov/udf/TabNavigationSnapshotEnvelope.kt) и [`SavedStateHandleTabNavigationStorage.kt`](app/src/main/java/com/shmakov/udf/SavedStateHandleTabNavigationStorage.kt) — отдельный one-key graph envelope и storage adapter без fallback/owner policy.
 - [`UdfApp.kt`](app/src/main/java/com/shmakov/udf/UdfApp.kt) — только application initialization и logging; navigation state там не хранится.
 - [`deeplink/`](app/src/main/java/com/shmakov/udf/deeplink) — framework-free URI parsing, demo normalization и validated hydration полной history.
 - [`navigation/`](app/src/main/java/com/shmakov/udf/navigation) — routes, back-stack entries, валидируемый navigation state, actions/reducer, snapshot/codec и screen abstractions.

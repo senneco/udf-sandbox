@@ -34,7 +34,9 @@
 
 Открытые `ContentRoute` и `ModalRoute` позволяют приложению объявлять собственные routes. Versioned primitive snapshot отделён от route objects; приложение подключает их через `RouteCodec`, а восстановление всегда повторно использует validation `NavState`.
 
-`TabNavigationState` — следующий pure composition layer: ordered list хранит стабильные `TabId`, отдельный non-empty `NavState` каждого tab и выбранный tab, а validator обеспечивает graph-wide уникальность `EntryId`. `TabReducer` разделяет container actions и exact leaf navigation, оставляет inactive histories теми же instances и поддерживает атомарные `OpenTab`/`ReplaceGraph`. `TabNavigationStateSnapshot` композиционно сохраняет selected tab, порядок tabs и каждый leaf `NavStateSnapshot` через один application `RouteCodec`; nested problems получают tab index/ID, а итоговый graph повторно проходит `TabNavigationState.fromTabs`. Graph использует отдельные `TabNavigationSnapshotResult`/`TabNavigationSnapshotProblem`, поэтому composition-specific diagnostics не расширяют sealed leaf `SnapshotProblem`. Outer, leaf и route payload versions независимы. Snapshot не содержит transition metadata и сам по себе ещё не является Android lifecycle evidence.
+`TabNavigationState` — следующий pure composition layer: ordered list хранит стабильные `TabId`, отдельный non-empty `NavState` каждого tab и выбранный tab, а validator обеспечивает graph-wide уникальность `EntryId`. `TabReducer` разделяет container actions и exact leaf navigation, оставляет inactive histories теми же instances и поддерживает атомарные `OpenTab`/`ReplaceGraph`. `TabNavigationStateSnapshot` композиционно сохраняет selected tab, порядок tabs и каждый leaf `NavStateSnapshot` через один application `RouteCodec`; nested problems получают tab index/ID, а итоговый graph повторно проходит `TabNavigationState.fromTabs`. Graph использует отдельные `TabNavigationSnapshotResult`/`TabNavigationSnapshotProblem`, поэтому composition-specific diagnostics не расширяют sealed leaf `SnapshotProblem`. Outer, leaf и route payload versions независимы.
+
+Internal `SavedStateHandleTabNavigationStorage` проводит весь graph через один tab-specific `ArrayList<String>` и обязательный application `RouteCodec`. Outer envelope содержит length-prefixed полные payload-ы существующего linear leaf-envelope; это переиспользует strict parser и независимо версионирует graph envelope, graph snapshot, leaf envelope, leaf snapshot и route payload. Decode агрегирует ошибки валидных leaf segments с tab context; повреждённые outer boundaries отклоняются целиком. Save/restore очищают только tab-specific stale key, не выбирают fallback и не затрагивают linear storage. Storage adapter не владеет Flow/frame/revision/transition и сам по себе ещё не является Activity lifecycle evidence.
 
 Navigation input представлен закрытым набором typed `NavAction`, а `NavReducer.reduce(state, action)` является чистой Kotlin-функцией. Результат — `NavReduction.Changed(state, transition)` либо `NavReduction.Unchanged(state, reason)`. Action factories материализуют identity новых entries до reduction, поэтому reducer не генерирует случайные значения.
 
@@ -295,7 +297,7 @@ Route, entry identity, validated `NavState`, primitive snapshot, `SavedStateHand
 
 - Должна ли каноническая навигация остаться линейной историей или стать явным деревом?
 - Как превратить внутреннее exact-intent matching в простой application-defined animation policy API?
-- Как встроить уже выделенный stateful tab graph в store/renderer и per-entry saveable state, не усложнив линейный базовый API?
+- Как встроить уже выделенный и сохраняемый stateful tab graph в owner/store, renderer и per-entry saveable state, не усложнив линейный базовый API?
 - Как predictive Back интегрируется с reducer-owned navigation state?
 - Может ли Navigation Compose помочь с платформенной интеграцией, не становясь владельцем канонической истории?
 
