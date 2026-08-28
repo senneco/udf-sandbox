@@ -374,6 +374,42 @@ class ModalPresentationPlannerContractTest {
     }
 
     @Test
+    fun `container reset snaps desired layers and preserves exit generation`() {
+        val old = layer("reset-old")
+        val firstExitState = readyState(
+            ModalPresentationPlanner.reconcile(
+                previous = ModalPresentationPlanner.start(70, listOf(old)),
+                navigationRevision = 71,
+                desired = emptyList(),
+            ),
+        )
+        val staleToken = exiting(firstExitState, old.entry.id).token
+        val incoming = layer("reset-incoming")
+
+        val reset = ModalPresentationPlanner.snap(
+            previous = firstExitState,
+            navigationRevision = 72,
+            desired = listOf(incoming),
+        )
+
+        assertEquals(
+            listOf(presented(incoming, ModalEntrance.Snap)),
+            reset.layers,
+        )
+        assertEquals(staleToken.generation, reset.lastIssuedExitGeneration)
+
+        val nextExit = readyState(
+            ModalPresentationPlanner.reconcile(reset, 73, emptyList()),
+        )
+        val nextToken = exiting(nextExit, incoming.entry.id).token
+        assertTrue(nextToken.generation > staleToken.generation)
+        assertTrue(
+            ModalPresentationPlanner.completeExit(nextExit, staleToken)
+                is ModalExitCompletion.Unchanged,
+        )
+    }
+
+    @Test
     fun `surviving ID reorder returns a typed fallback snapped to exact desired order`() {
         val a = layer("a")
         val b = layer("b")

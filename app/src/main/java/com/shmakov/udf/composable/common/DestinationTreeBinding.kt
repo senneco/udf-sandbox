@@ -78,6 +78,8 @@ internal data class BoundModalLayer(
 internal data class BoundPresentedModalLayer(
     val presentation: PresentedModalLayer,
     val screen: ModalScreen,
+    /** Guard captured when this physical layer was accepted. Exiting layers retain the old one. */
+    val actionOrigin: PhysicalNavigationActionOrigin,
 )
 
 internal sealed class PresentedModalLayersBindingResult {
@@ -195,6 +197,7 @@ internal object DestinationTreeBinder {
         layers: List<PresentedModalLayer>,
         desiredLayers: List<BoundModalLayer>,
         acceptedLayers: List<BoundPresentedModalLayer>,
+        desiredActionOrigin: PhysicalNavigationActionOrigin,
     ): PresentedModalLayersBindingResult {
         val desiredById = desiredLayers.associateBy { layer -> layer.layer.entry.id }
         val acceptedById = acceptedLayers.associateBy { layer ->
@@ -203,9 +206,10 @@ internal object DestinationTreeBinder {
         val boundLayers = ArrayList<BoundPresentedModalLayer>(layers.size)
         layers.forEach { presentation ->
             val entryId = presentation.layer.entry.id
+            val acceptedLayer = acceptedById[entryId]
             val screen = when (presentation) {
                 is PresentedModalLayer.Desired -> desiredById[entryId]?.screen
-                is PresentedModalLayer.Exiting -> acceptedById[entryId]?.screen
+                is PresentedModalLayer.Exiting -> acceptedLayer?.screen
             }
             if (screen == null) {
                 return PresentedModalLayersBindingResult.Failure(
@@ -214,7 +218,11 @@ internal object DestinationTreeBinder {
                     ),
                 )
             }
-            boundLayers += BoundPresentedModalLayer(presentation, screen)
+            val actionOrigin = when (presentation) {
+                is PresentedModalLayer.Desired -> desiredActionOrigin
+                is PresentedModalLayer.Exiting -> checkNotNull(acceptedLayer).actionOrigin
+            }
+            boundLayers += BoundPresentedModalLayer(presentation, screen, actionOrigin)
         }
 
         return PresentedModalLayersBindingResult.Success(boundLayers)

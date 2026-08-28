@@ -141,6 +141,39 @@ fun dispatch(action: TabAction) = navigation.dispatch(action)
 
 Fallback создаётся лениво только для `Missing` или `Rejected`; успешное restoration не генерирует лишние IDs и не переписывает уже валидный payload. Стабильный `startResult` один раз сообщает `Restored`, `StartedFresh(saveResult)` или `Recovered(exactProblems, fallbackSaveResult)`. Последующие save failures приходят только в результате конкретного `dispatch`: `Changed(reduction, saveResult)` либо `Unchanged(reduction)`. При Failed валидный in-memory Changed всё равно публикуется и не откатывается. Constructor и dispatch явно `@MainThread`: composed `SavedStateHandle` имеет тот же AndroidX contract. Revision и transition остаются process-local и всегда начинают с `0`/`null`.
 
+Internal app-side `DemoTabNavigation` показывает Compose-границу без преждевременного public
+`TabSpec`: порядок и selected item берутся только из graph, visuals приходят из `Map<TabId,
+DemoTabUi>`, а selected history проходит обычные projector и destination binding. Один renderer
+получает selected leaf target и отдельный graph-wide retention ledger, поэтому `A → B → A`
+сохраняет exact `rememberSaveable` state обеих веток. Физическая branch захватывает собственные
+`tabId + topEntryId`, и её поздний callback остаётся reducer-guarded после switch/`ReplaceGraph`.
+Tab switch, cross-tab open и graph replacement snap-ятся; matching leaf transition продолжает
+обычный motion. Valid старый persisted graph сам не получает новый tab только потому, что он
+появился в visual catalog: такое обновление является явной app-owned migration через
+`ReplaceGraph`.
+
+Минимальный application call-site выглядит так (все Material-типы здесь internal demo, а не
+ограничение будущего public API):
+
+```kotlin
+val frame by viewModel.frames.collectAsStateWithLifecycle()
+
+DemoTabNavigation(
+    frame = frame,
+    tabUiById = mapOf(
+        AccountsTabId to DemoTabUi(R.string.accounts, AccountsIcon),
+        CardsTabId to DemoTabUi(R.string.cards, CardsIcon),
+    ),
+    layoutPolicy = windowLayoutPolicy,
+    destinationCatalog = appDestinationCatalog,
+    onAction = viewModel::dispatch,
+)
+```
+
+Map не задаёт order и не добавляет tab: `frame.state.tabs` остаётся единственным источником обоих
+решений. `TabNavigationStore`, codec и `SavedStateHandle` остаются во `ViewModel`, а composable
+получает только immutable frame и typed dispatch boundary.
+
 ## Чистая layout projection
 
 Policy является маленьким pure Kotlin-правилом. Single-pane всегда заменяет root, а demo expanded-policy оставляет `Home` видимым и помещает его следующего content-child во вложенный слот:
@@ -252,6 +285,10 @@ Bottom-sheet bridge считает presentation state единственным �
 Renderer передаёт каждому content-screen явный `childContent`. Screen, который может стать владельцем `ChildOf(...)`, обязан вызвать эту lambda ровно в нужном месте; текущая demo policy создаёт child только у `Home`, а leaf screens её не вызывают. Этот договор и разрыв между публичными `Screen`/`ModalScreen` и internal catalog/renderer остаются незавершённой demo boundary, а не рекомендуемым consumer API.
 
 Scoped device gate и два landscape-кадра для regression #13 сохранены в [evidence issue #13](docs/evidence/issue-13/README.md). Gate retained-modal lifecycle и owner placement находятся в [evidence issue #14](docs/evidence/issue-14/README.md). Cancellation-safe bottom-sheet convergence, exact modal Back, реальный swipe и финальные кадры собраны в [evidence issue #15](docs/evidence/issue-15/README.md). Recreation, primitive `Bundle`/`Parcel` restoration и modal `Snap` bootstrap зафиксированы в [evidence issue #16](docs/evidence/issue-16/README.md). Exact-entry `rememberSaveable`, relocation, cleanup и Activity recreation покрыты в [evidence issue #17](docs/evidence/issue-17/README.md). Полная account deep-link hydration, cold/warm Android delivery и Back history собраны в [evidence issue #18](docs/evidence/issue-18/README.md). Committed-pass gate изоляции неизменившегося parent находится в [evidence issue #28](docs/evidence/issue-28/README.md).
+
+Stateful tab graph, physical-branch action guards, graph-wide `rememberSaveable` retention,
+committed-pass isolation и portrait/landscape `A → B → A` journey находятся в
+[evidence issue #52](docs/evidence/issue-52/README.md).
 
 ## Переходы состояния
 
@@ -396,6 +433,7 @@ Pure JVM contracts проверяют wire format, validation/fallback, save-bef
 - [`NavigationSnapshotEnvelope.kt`](app/src/main/java/com/shmakov/udf/NavigationSnapshotEnvelope.kt) и [`SavedNavigationStateStore.kt`](app/src/main/java/com/shmakov/udf/SavedNavigationStateStore.kt) — one-key Bundle-safe wire format и typed `SavedStateHandle` restoration boundary.
 - [`TabNavigationSnapshotEnvelope.kt`](app/src/main/java/com/shmakov/udf/TabNavigationSnapshotEnvelope.kt) и [`SavedStateHandleTabNavigationStorage.kt`](app/src/main/java/com/shmakov/udf/SavedStateHandleTabNavigationStorage.kt) — отдельный one-key graph envelope и storage adapter без fallback/owner policy.
 - [`TabNavigationStore.kt`](app/src/main/java/com/shmakov/udf/TabNavigationStore.kt) — один main-thread graph owner, lazy startup recovery, typed persistence outcomes и process-local frames.
+- [`TabNavigationRendering.kt`](app/src/main/java/com/shmakov/udf/TabNavigationRendering.kt) — pure selected-leaf projection, graph-wide retention, physical action origin и tab-to-leaf motion policy.
 - [`UdfApp.kt`](app/src/main/java/com/shmakov/udf/UdfApp.kt) — только application initialization и logging; navigation state там не хранится.
 - [`deeplink/`](app/src/main/java/com/shmakov/udf/deeplink) — framework-free URI parsing, demo normalization и validated hydration полной history.
 - [`navigation/`](app/src/main/java/com/shmakov/udf/navigation) — routes, back-stack entries, валидируемый navigation state, actions/reducer, snapshot/codec и screen abstractions.
@@ -406,6 +444,7 @@ Pure JVM contracts проверяют wire format, validation/fallback, save-bef
 - [`DestinationTreeBinding.kt`](app/src/main/java/com/shmakov/udf/composable/common/DestinationTreeBinding.kt) — атомарный typed route-to-screen binding всего projected tree.
 - [`EntrySaveableStateHost.kt`](app/src/main/java/com/shmakov/udf/composable/common/EntrySaveableStateHost.kt) — exact-entry `SaveableStateProvider`, movable composition и full-history retention/cleanup ledger.
 - [`AnimatedNavigation.kt`](app/src/main/java/com/shmakov/udf/composable/common/AnimatedNavigation.kt) — recursive root/nested rendering из branch-owned trees, target-wins entry ownership, content transitions и один renderer-level modal presentation lifecycle.
+- [`DemoTabNavigation.kt`](app/src/main/java/com/shmakov/udf/composable/common/DemoTabNavigation.kt) — internal Material tab sample с state-owned order/selection и stable tab-bar boundary.
 - [`BottomSheetLayout.kt`](app/src/main/java/com/shmakov/udf/composable/common/BottomSheetLayout.kt) — state-authoritative request/convergence/completion bridge к Material bottom sheet.
 - [`composable/screen/`](app/src/main/java/com/shmakov/udf/composable/screen) — destination adapters с typed actions и явным `childContent` slot.
 - [`composable/content/`](app/src/main/java/com/shmakov/udf/composable/content) — минимальный demo UI и текущие navigation triggers.
