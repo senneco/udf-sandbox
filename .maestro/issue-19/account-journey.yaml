@@ -1,22 +1,16 @@
 appId: com.shmakov.udf
-name: Reference account navigation journey
+name: Reference stateful tabs journey
 ---
 - launchApp:
     clearState: true
 - assertVisible: "Go to Account #2"
+- tapOn: "Account #1 local value: 0"
+- assertVisible: "Account #1 local value: 1"
+- tapOn: "Cards"
+- assertVisible: "Card Screen #1"
+- tapOn: "Card #1 local value: 0"
+- assertVisible: "Card #1 local value: 1"
+- tapOn: "Accounts"
+- assertVisible: "Account #1 local value: 1"
 - back
 - assertVisible: "Accounts Screen"
-- back
-- assertVisible: "Home Screen"
-- tapOn: "Go to Accounts"
-- assertVisible: "Accounts Screen"
-- tapOn: "Go to Account 1"
-- assertVisible: "Go to details"
-- tapOn: "Go to details"
-- assertVisible: "Account Details Screen #1"
-- back
-- assertVisible: "Go to Account #2"
-- back
-- assertVisible: "Accounts Screen"
-- back
-- assertVisible: "Home Screen"

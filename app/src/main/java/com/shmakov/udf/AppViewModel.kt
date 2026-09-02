@@ -5,96 +5,95 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import com.shmakov.udf.deeplink.DeepLinkEntryIdFactory
 import com.shmakov.udf.deeplink.DemoDeepLinkNotHandledReason
-import com.shmakov.udf.deeplink.DemoDeepLinkResolution
 import com.shmakov.udf.deeplink.DemoDeepLinkResolutionProblem
-import com.shmakov.udf.deeplink.DemoDeepLinkResolver
 import com.shmakov.udf.deeplink.FreshDeepLinkEntryIdFactory
 import com.shmakov.udf.deeplink.NormalizedDemoDeepLink
-import com.shmakov.udf.navigation.Account
-import com.shmakov.udf.navigation.Accounts
-import com.shmakov.udf.navigation.Home
-import com.shmakov.udf.navigation.NavAction
-import com.shmakov.udf.navigation.NavReduction
-import com.shmakov.udf.navigation.NavState
-import com.shmakov.udf.navigation.NavUnchangedReason
+import com.shmakov.udf.navigation.DemoRouteCodec
+import com.shmakov.udf.navigation.RouteCodec
+import com.shmakov.udf.navigation.TabAction
+import com.shmakov.udf.navigation.TabNavigationState
+import com.shmakov.udf.navigation.TabUnchangedReason
 import kotlinx.coroutines.flow.StateFlow
 
-/** Activity-scoped lifecycle owner for the demo application state. */
+/** Activity-scoped lifecycle owner of the complete demo tab-navigation graph. */
 internal class AppViewModel(
     savedStateHandle: SavedStateHandle,
-    fallbackState: AppState,
+    fallbackGraphFactory: TabNavigationStateFactory,
+    routeCodec: RouteCodec,
     private val deepLinkEntryIdFactory: DeepLinkEntryIdFactory = FreshDeepLinkEntryIdFactory,
 ) : ViewModel() {
     constructor(savedStateHandle: SavedStateHandle) : this(
         savedStateHandle = savedStateHandle,
-        fallbackState = demoAppState(),
+        fallbackGraphFactory = TabNavigationStateFactory(DemoTabGraph::initial),
+        routeCodec = DemoRouteCodec,
     )
 
-    private val savedNavigationStateStore = SavedNavigationStateStore(savedStateHandle)
-    private val initialState = when (val restoration = savedNavigationStateStore.restore()) {
-        NavigationRestoreResult.Missing,
-        is NavigationRestoreResult.Rejected,
-        -> fallbackState
-
-        is NavigationRestoreResult.Restored -> fallbackState.copy(
-            navState = restoration.navState,
-        )
-    }
-    private val store = AppStore(
-        initialState = initialState,
-        persistNavigationState = savedNavigationStateStore::save,
+    private val store = TabNavigationStore(
+        savedStateHandle = savedStateHandle,
+        routeCodec = routeCodec,
+        fallbackStateFactory = fallbackGraphFactory,
     )
 
-    init {
-        // Persist even a fresh fallback so its generated entry IDs survive the first recreation.
-        savedNavigationStateStore.save(initialState.navState)
-    }
-
-    val frames: StateFlow<AppStateFrame> = store.frames
+    val startResult: TabNavigationStartResult = store.startResult
+    val frames: StateFlow<TabNavigationFrame> = store.frames
 
     @MainThread
-    fun dispatch(action: NavAction): NavReduction = store.dispatch(action)
+    fun dispatch(action: TabAction): TabNavigationDispatchResult = store.dispatch(action)
 
-    /** Resolves a complete target state before dispatching one atomic history replacement. */
+    /** Resolves a complete target leaf before dispatching one atomic [TabAction.OpenTab]. */
     @MainThread
     fun handleDeepLink(rawUri: String?): DeepLinkHandlingResult =
         when (
-            val resolution = DemoDeepLinkResolver.resolve(
+            val plan = DemoTabDeepLinkPlanner.plan(
                 rawUri = rawUri,
+                state = store.frames.value.state,
+                accountsTabId = DemoTabGraph.accountsTabId,
                 entryIdFactory = deepLinkEntryIdFactory,
             )
         ) {
-            is DemoDeepLinkResolution.Resolved -> when (
-                val reduction = store.dispatch(NavAction.replaceHistory(resolution.navState))
+            is DemoTabDeepLinkPlan.Planned -> when (
+                val dispatchResult = store.dispatch(plan.action)
             ) {
-                is NavReduction.Changed -> DeepLinkHandlingResult.Applied(
-                    deepLink = resolution.deepLink,
-                    reduction = reduction,
+                is TabNavigationDispatchResult.Changed -> DeepLinkHandlingResult.Applied(
+                    deepLink = plan.deepLink,
+                    action = plan.action,
+                    dispatchResult = dispatchResult,
                 )
-                is NavReduction.Unchanged -> DeepLinkHandlingResult.Unchanged(
-                    deepLink = resolution.deepLink,
-                    reason = reduction.reason,
+
+                is TabNavigationDispatchResult.Unchanged -> DeepLinkHandlingResult.Unchanged(
+                    deepLink = plan.deepLink,
+                    action = plan.action,
+                    dispatchResult = dispatchResult,
                 )
             }
-            is DemoDeepLinkResolution.NotHandled -> DeepLinkHandlingResult.NotHandled(
-                resolution.reason,
-            )
-            is DemoDeepLinkResolution.Rejected -> DeepLinkHandlingResult.Rejected(
-                resolution.problem,
-            )
+
+            is DemoTabDeepLinkPlan.NotHandled -> DeepLinkHandlingResult.NotHandled(plan.reason)
+            is DemoTabDeepLinkPlan.Rejected -> DeepLinkHandlingResult.Rejected(plan.problem)
+            is DemoTabDeepLinkPlan.ConfigurationRejected ->
+                DeepLinkHandlingResult.ConfigurationRejected(plan.problem)
         }
+
+    /** Publishes one caller-built complete graph, suitable for logout or full app reset. */
+    @MainThread
+    fun replaceNavigationGraph(target: TabNavigationState): TabNavigationDispatchResult =
+        store.dispatch(TabAction.replaceGraph(target))
 }
 
 internal sealed class DeepLinkHandlingResult {
     data class Applied(
         val deepLink: NormalizedDemoDeepLink,
-        val reduction: NavReduction.Changed,
+        val action: TabAction.OpenTab,
+        val dispatchResult: TabNavigationDispatchResult.Changed,
     ) : DeepLinkHandlingResult()
 
     data class Unchanged(
         val deepLink: NormalizedDemoDeepLink,
-        val reason: NavUnchangedReason,
-    ) : DeepLinkHandlingResult()
+        val action: TabAction.OpenTab,
+        val dispatchResult: TabNavigationDispatchResult.Unchanged,
+    ) : DeepLinkHandlingResult() {
+        val reason: TabUnchangedReason
+            get() = dispatchResult.reduction.reason
+    }
 
     data class NotHandled(
         val reason: DemoDeepLinkNotHandledReason,
@@ -103,13 +102,8 @@ internal sealed class DeepLinkHandlingResult {
     data class Rejected(
         val problem: DemoDeepLinkResolutionProblem,
     ) : DeepLinkHandlingResult()
-}
 
-private fun demoAppState(): AppState = AppState(
-    navState = NavState.history(
-        root = Home,
-        Accounts,
-        Account(accountId = 1),
-    ),
-    showInPlace = false,
-)
+    data class ConfigurationRejected(
+        val problem: DemoTabDeepLinkConfigurationProblem,
+    ) : DeepLinkHandlingResult()
+}

@@ -35,11 +35,14 @@ Compile-time gate, который выполняет и CI:
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
 ```
 
-Полный device-suite с автоматической сборкой, установкой и выгрузкой отчёта:
+Полный device-suite с автоматической сборкой, установкой и выгрузкой отчёта, когда подключён ровно один разрешённый target:
 
 ```bash
 ./gradlew connectedDebugAndroidTest
 ```
+
+Если targets несколько, не полагайтесь на `ANDROID_SERIAL` для Gradle managed selection: соберите APK,
+установите их адресно и вызовите runner через `adb -s` только на своём serial.
 
 Только black-box reference journeys:
 
@@ -64,13 +67,13 @@ adb -s "$ANDROID_SERIAL" shell am instrument -w -r \
 
 | Граница | Эталонное доказательство |
 | --- | --- |
-| Полный пользовательский путь | `ReferenceNavigationE2ETest.homeAccountsSheetDetailsAndBackTraverseVisibleHistory` |
-| Один state в single-/expanded-layout | `ReferenceNavigationE2ETest.sameHistoryReprojectsAcrossPortraitAndLandscape`, `EntrySaveableStateRegressionTest.sameExactAccountsEntryMovesRootNestedRootWithoutResetOrDuplicateNode` и pure projection contracts |
+| Полный пользовательский путь | `ReferenceNavigationE2ETest.accountsSheetDetailsAndBackTraverseSelectedTabHistory` |
+| Один state в single-/expanded-layout | `ReferenceNavigationE2ETest.sameSelectedTabHistorySurvivesPortraitAndLandscape`, `EntrySaveableStateRegressionTest.sameExactAccountsEntryMovesRootNestedRootWithoutResetOrDuplicateNode` и pure projection contracts |
 | Stacked sheets и быстрый Back | `ReferenceNavigationE2ETest.rapidBackOnStackedSheetsDismissesOnlyCapturedTopSheet` плюс exact-ID reducer/presentation contracts |
 | Scrim и swipe dismissal | Два `ReferenceNavigationE2ETest` journey и phase-focused `BottomSheetLayoutRegressionTest` |
-| Activity recreation | `MainActivityDeepLinkRegressionTest` и `MainActivityRestorationRegressionTest` |
+| Stateful tabs и Activity recreation | `MainActivityBackRegressionTest`, `MainActivityDeepLinkRegressionTest` и `MainActivityRestorationRegressionTest` |
 | Независимый UI state одинаковых routes | `EntrySaveableStateRegressionTest.duplicateRoutesWithDifferentEntryIdsKeepIndependentState` |
-| Изоляция неизменившегося parent от nested recomposition | `NestedRecompositionIsolationRegressionTest` и pure projection contract |
+| Изоляция неизменившегося parent/tab shell от nested recomposition | `NestedRecompositionIsolationRegressionTest`, `DemoTabNavigationRegressionTest.nestedLocalChangeDoesNotCommitShellTabBarStableParentOrInactiveTab` и positive controls |
 | Retained outgoing/modal presentation | `AnimatedNavigationRegressionTest` |
 
 Black-box E2E меняет state только через UI semantics, gestures, Android Back и orientation. Он не

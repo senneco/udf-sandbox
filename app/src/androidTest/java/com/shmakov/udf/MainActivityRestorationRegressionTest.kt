@@ -3,21 +3,37 @@ package com.shmakov.udf
 import android.os.Bundle
 import android.os.Parcel
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.shmakov.udf.composable.common.demoTabItemTag
+import com.shmakov.udf.composable.content.accountLocalStateTag
+import com.shmakov.udf.composable.content.cardLocalStateTag
+import com.shmakov.udf.navigation.Account
+import com.shmakov.udf.navigation.Accounts
 import com.shmakov.udf.navigation.BackStackEntry
-import com.shmakov.udf.navigation.Home
-import com.shmakov.udf.navigation.NavAction
+import com.shmakov.udf.navigation.Card
+import com.shmakov.udf.navigation.Cards
+import com.shmakov.udf.navigation.DemoRouteCodec
+import com.shmakov.udf.navigation.EntryId
 import com.shmakov.udf.navigation.NavState
-import com.shmakov.udf.navigation.NavTransitionIntent
-import com.shmakov.udf.navigation.Transactions
+import com.shmakov.udf.navigation.NavStateCreationResult
+import com.shmakov.udf.navigation.TabAction
+import com.shmakov.udf.navigation.TabId
+import com.shmakov.udf.navigation.TabNavigationState
+import com.shmakov.udf.navigation.TabState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,22 +45,41 @@ class MainActivityRestorationRegressionTest {
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun contentHistorySurvivesActivityRecreationAndBackStillRevealsHome() {
-        returnDefaultDemoHistoryToHome()
+    fun activityABARetainsBothHistoriesExactIdsAndEntryLocalSaveableState() {
+        waitUntilDisplayed(ACCOUNT_ONE_MODAL_CONTENT)
+        val originalViewModel = viewModel()
+        val initialHistories = originalViewModel.frames.value.state.historyEntriesByTab()
 
-        composeRule.onNodeWithText(GO_TO_TRANSACTIONS).performClick()
-        waitUntilDisplayed(TRANSACTIONS_SCREEN)
+        increment(accountLocalStateTag(1), expectedText = "Account #1 local value: 1")
+        selectTab(DemoTabGraph.cardsTabId)
+        waitUntilDisplayed(CARD_ONE_SCREEN)
+        increment(cardLocalStateTag(1), expectedText = "Card #1 local value: 1")
+        increment(cardLocalStateTag(1), expectedText = "Card #1 local value: 2")
+
+        selectTab(DemoTabGraph.accountsTabId)
+        waitUntilDisplayed(ACCOUNT_ONE_MODAL_CONTENT)
+        composeRule.onNodeWithTag(accountLocalStateTag(1))
+            .assertTextEquals("Account #1 local value: 1")
+        assertEquals(initialHistories, originalViewModel.frames.value.state.historyEntriesByTab())
+        val beforeRecreation = originalViewModel.frames.value
+        val originalActivity = composeRule.activity
 
         composeRule.activityRule.scenario.recreate()
 
-        waitUntilDisplayed(TRANSACTIONS_SCREEN)
-        composeRule.runOnUiThread {
-            composeRule.activity.onBackPressedDispatcher.onBackPressed()
-        }
-        waitUntilAbsent(TRANSACTIONS_SCREEN)
-        waitUntilDisplayed(HOME_SCREEN)
+        val recreatedActivity = composeRule.activity
+        val recreatedViewModel = viewModel()
+        assertNotSame(originalActivity, recreatedActivity)
+        assertSame(originalViewModel, recreatedViewModel)
+        assertEquals(beforeRecreation, recreatedViewModel.frames.value)
+        waitUntilDisplayed(ACCOUNT_ONE_MODAL_CONTENT)
+        composeRule.onNodeWithTag(accountLocalStateTag(1))
+            .assertTextEquals("Account #1 local value: 1")
 
-        composeRule.onNodeWithText(HOME_SCREEN).assertIsDisplayed()
+        selectTab(DemoTabGraph.cardsTabId)
+        waitUntilDisplayed(CARD_ONE_SCREEN)
+        composeRule.onNodeWithTag(cardLocalStateTag(1))
+            .assertTextEquals("Card #1 local value: 2")
+        assertEquals(initialHistories, recreatedViewModel.frames.value.state.historyEntriesByTab())
     }
 
     @Test
@@ -58,8 +93,7 @@ class MainActivityRestorationRegressionTest {
         composeRule.mainClock.advanceTimeByFrame()
         composeRule.waitForIdle()
 
-        // Durable navigation already removed the modal, while the old renderer still retains its
-        // presentation for the exit animation. That process-local layer must not be recreated.
+        // Durable history already removed the modal while its old renderer still owns exit UI.
         composeRule.onNodeWithText(ACCOUNT_ONE_MODAL_CONTENT).assertExists()
 
         composeRule.activityRule.scenario.recreate()
@@ -68,30 +102,37 @@ class MainActivityRestorationRegressionTest {
 
         composeRule.onNodeWithText(ACCOUNT_ONE_MODAL_CONTENT).assertDoesNotExist()
         composeRule.onNodeWithText(ACCOUNTS_SCREEN).assertIsDisplayed()
+        composeRule.onNodeWithTag(demoTabItemTag(DemoTabGraph.accountsTabId), true)
+            .assertIsSelected()
     }
 
     @Test
-    fun parcelledPrimitivePayloadRestoresExactHistoryIntoFreshRevisionZeroFrame() {
-        lateinit var expectedHistory: List<BackStackEntry>
+    fun parcelledGraphRestoresEveryTabIntoFreshRevisionZeroOwner() {
+        val initial = graph(
+            selected = ACCOUNTS_TAB,
+            tab(
+                ACCOUNTS_TAB,
+                BackStackEntry(EntryId("accounts"), Accounts),
+                BackStackEntry(EntryId("account-5"), Account(5)),
+            ),
+            tab(
+                CARDS_TAB,
+                BackStackEntry(EntryId("cards"), Cards),
+                BackStackEntry(EntryId("card-7"), Card(7)),
+            ),
+        )
+        lateinit var expectedState: TabNavigationState
         lateinit var navigationKey: String
         lateinit var sourcePayload: ArrayList<String>
         composeRule.runOnIdle {
             val sourceHandle = SavedStateHandle()
             val sourceViewModel = AppViewModel(
                 savedStateHandle = sourceHandle,
-                fallbackState = AppState(
-                    navState = NavState.startAt(Home),
-                    showInPlace = false,
-                ),
+                fallbackGraphFactory = TabNavigationStateFactory { initial },
+                routeCodec = DemoRouteCodec,
             )
-            val rootId = sourceViewModel.frames.value.appState.navState.root.id
-            sourceViewModel.dispatch(
-                NavAction.navigateFrom(
-                    sourceId = rootId,
-                    route = Transactions,
-                ),
-            )
-            expectedHistory = sourceViewModel.frames.value.appState.navState.entries
+            sourceViewModel.dispatch(TabAction.select(CARDS_TAB))
+            expectedState = sourceViewModel.frames.value.state
             navigationKey = sourceHandle.keys().single()
             sourcePayload = ArrayList(
                 checkNotNull(sourceHandle.get<ArrayList<String>>(navigationKey)),
@@ -104,49 +145,53 @@ class MainActivityRestorationRegressionTest {
         }
         val restoredBundle = parcelRoundTrip(bundle)
         val copiedPayload = checkNotNull(restoredBundle.getStringArrayList(navigationKey))
-
         assertEquals(sourcePayload, copiedPayload)
         assertNotSame(bundlePayload, copiedPayload)
 
-        lateinit var restoredHistory: List<BackStackEntry>
-        var restoredRevision = -1L
-        var restoredTransition: NavTransitionIntent? = null
+        lateinit var restoredFrame: TabNavigationFrame
         composeRule.runOnIdle {
-            val recreatedViewModel = AppViewModel(
+            val freshOwner = AppViewModel(
                 savedStateHandle = SavedStateHandle(
                     mapOf(navigationKey to ArrayList(copiedPayload)),
                 ),
-                fallbackState = AppState(
-                    navState = NavState.startAt(Home),
-                    showInPlace = true,
-                ),
+                fallbackGraphFactory = TabNavigationStateFactory {
+                    throw AssertionError("Valid parcelled graph must win")
+                },
+                routeCodec = DemoRouteCodec,
             )
-            val restoredFrame = recreatedViewModel.frames.value
-            restoredHistory = restoredFrame.appState.navState.entries
-            restoredRevision = restoredFrame.navigationRevision
-            restoredTransition = restoredFrame.navigationTransition
+            restoredFrame = freshOwner.frames.value
         }
 
-        assertEquals(expectedHistory, restoredHistory)
-        assertEquals(listOf(Home, Transactions), expectedHistory.map { entry -> entry.route })
-        assertEquals(0L, restoredRevision)
-        assertNull(restoredTransition)
+        assertEquals(expectedState, restoredFrame.state)
+        assertEquals(expectedState.historyEntriesByTab(), restoredFrame.state.historyEntriesByTab())
+        assertEquals(CARDS_TAB, restoredFrame.state.selectedTabId)
+        assertEquals(0L, restoredFrame.revision)
+        assertNull(restoredFrame.transition)
     }
 
-    /** The demo fixture intentionally starts at Home -> Accounts -> Account 1. */
-    private fun returnDefaultDemoHistoryToHome() {
-        waitUntilDisplayed(ACCOUNT_ONE_MODAL_CONTENT)
-        composeRule.runOnUiThread {
-            composeRule.activity.onBackPressedDispatcher.onBackPressed()
-        }
-        waitUntilAbsent(ACCOUNT_ONE_MODAL_CONTENT)
-        waitUntilDisplayed(ACCOUNTS_SCREEN)
+    private fun viewModel(): AppViewModel =
+        ViewModelProvider(composeRule.activity)[AppViewModel::class.java]
 
-        composeRule.runOnUiThread {
-            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+    private fun selectTab(tabId: TabId) {
+        composeRule.onNodeWithTag(demoTabItemTag(tabId), true).performClick()
+        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MILLIS) {
+            viewModel().frames.value.state.selectedTabId == tabId
         }
-        waitUntilAbsent(ACCOUNTS_SCREEN)
-        waitUntilDisplayed(HOME_SCREEN)
+        composeRule.onNodeWithTag(demoTabItemTag(tabId), true).assertIsSelected()
+        val other = if (tabId == DemoTabGraph.accountsTabId) {
+            DemoTabGraph.cardsTabId
+        } else {
+            DemoTabGraph.accountsTabId
+        }
+        composeRule.onNodeWithTag(demoTabItemTag(other), true).assertIsNotSelected()
+    }
+
+    private fun increment(tag: String, expectedText: String) {
+        composeRule.onNodeWithTag(tag).performClick()
+        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MILLIS) {
+            composeRule.onAllNodesWithText(expectedText).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag(tag).assertTextEquals(expectedText)
     }
 
     private fun waitUntilDisplayed(text: String) {
@@ -157,11 +202,20 @@ class MainActivityRestorationRegressionTest {
         composeRule.onNodeWithText(text).assertIsDisplayed()
     }
 
-    private fun waitUntilAbsent(text: String) {
-        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MILLIS) {
-            composeRule.onAllNodesWithText(text).fetchSemanticsNodes().isEmpty()
-        }
-    }
+    private fun TabNavigationState.historyEntriesByTab(): Map<TabId, List<BackStackEntry>> =
+        tabs.associate { tab -> tab.id to tab.history.entries }
+
+    private fun graph(selected: TabId, vararg tabs: TabState): TabNavigationState =
+        TabNavigationState.create(selected, tabs.toList())
+
+    private fun tab(id: TabId, vararg entries: BackStackEntry): TabState =
+        TabState(
+            id = id,
+            history = when (val result = NavState.fromEntries(entries.toList())) {
+                is NavStateCreationResult.Valid -> result.state
+                is NavStateCreationResult.Invalid -> throw AssertionError(result.problems)
+            },
+        )
 
     private fun parcelRoundTrip(source: Bundle): Bundle {
         val parcel = Parcel.obtain()
@@ -175,11 +229,11 @@ class MainActivityRestorationRegressionTest {
     }
 
     private companion object {
-        const val HOME_SCREEN = "Home Screen"
-        const val GO_TO_TRANSACTIONS = "Go to Transactions"
-        const val TRANSACTIONS_SCREEN = "Transactions Screen"
-        const val ACCOUNTS_SCREEN = "Accounts Screen"
+        val ACCOUNTS_TAB = TabId("accounts")
+        val CARDS_TAB = TabId("cards")
         const val ACCOUNT_ONE_MODAL_CONTENT = "Go to Account #2"
+        const val ACCOUNTS_SCREEN = "Accounts Screen"
+        const val CARD_ONE_SCREEN = "Card Screen #1"
         const val UI_TIMEOUT_MILLIS = 5_000L
     }
 }

@@ -17,9 +17,10 @@ import com.shmakov.udf.navigation.Account
 import com.shmakov.udf.navigation.AccountDetails
 import com.shmakov.udf.navigation.Accounts
 import com.shmakov.udf.navigation.BackStackEntry
-import com.shmakov.udf.navigation.Home
-import com.shmakov.udf.navigation.NavTransitionIntent
+import com.shmakov.udf.navigation.Card
+import com.shmakov.udf.navigation.Cards
 import com.shmakov.udf.navigation.Route
+import com.shmakov.udf.navigation.TabTransitionIntent
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
@@ -82,7 +83,7 @@ class MainActivityDeepLinkRegressionTest {
     }
 
     @Test
-    fun coldLinkUsesReducerOwnerAndIsNotReplayedOnRecreation() {
+    fun coldLinkUsesOneOpenTabAndIsNotReplayedOnActivityRecreation() {
         val launched = ActivityScenario.launch<MainActivity>(deepLinkIntent(CANONICAL_URI))
         scenario = launched
         lateinit var originalActivity: MainActivity
@@ -94,9 +95,15 @@ class MainActivityDeepLinkRegressionTest {
 
         waitForRoutes(originalViewModel, expectedDeepLinkRoutes())
         val originalFrame = originalViewModel.frames.value
-        val originalIds = originalFrame.appState.navState.entries.map(BackStackEntry::id)
-        assertEquals(1L, originalFrame.navigationRevision)
-        assertTrue(originalFrame.navigationTransition is NavTransitionIntent.HistoryReplaced)
+        val originalIds = originalFrame.state.allEntryIds()
+        assertEquals(DemoTabGraph.accountsTabId, originalFrame.state.selectedTabId)
+        assertEquals(1L, originalFrame.revision)
+        assertTrue(originalFrame.transition is TabTransitionIntent.TabOpened)
+        assertEquals(
+            listOf(Cards, Card(1)),
+            originalFrame.state[DemoTabGraph.cardsTabId]?.history?.entries
+                ?.map(BackStackEntry::route),
+        )
         waitUntilDisplayed(DETAILS_SCREEN)
 
         launched.recreate()
@@ -109,28 +116,23 @@ class MainActivityDeepLinkRegressionTest {
         }
         assertNotSame(originalActivity, recreatedActivity)
         assertSame(originalViewModel, recreatedViewModel)
-        assertEquals(originalIds, recreatedViewModel.frames.value.appState.navState.entries.map {
-            entry -> entry.id
-        })
-        assertEquals(1L, recreatedViewModel.frames.value.navigationRevision)
+        assertEquals(originalIds, recreatedViewModel.frames.value.state.allEntryIds())
+        assertEquals(1L, recreatedViewModel.frames.value.revision)
+        assertTrue(recreatedViewModel.frames.value.transition is TabTransitionIntent.TabOpened)
         waitUntilDisplayed(DETAILS_SCREEN)
 
         pressBack(recreatedActivity)
-        waitForRoutes(recreatedViewModel, listOf(Home, Accounts, Account(42)))
+        waitForRoutes(recreatedViewModel, listOf(Accounts, Account(42)))
         waitUntilDisplayed(ACCOUNT_MODAL_CONTENT)
 
         pressBack(recreatedActivity)
-        waitForRoutes(recreatedViewModel, listOf(Home, Accounts))
+        waitForRoutes(recreatedViewModel, listOf(Accounts))
         waitUntilDisplayed(ACCOUNTS_SCREEN)
         waitUntilAbsent(ACCOUNT_MODAL_CONTENT)
-
-        pressBack(recreatedActivity)
-        waitForRoutes(recreatedViewModel, listOf(Home))
-        waitUntilDisplayed(HOME_SCREEN)
     }
 
     @Test
-    fun warmLinkIsDeliveredToTheSameActivityAndViewModelThroughOnNewIntent() {
+    fun warmLinkUsesSameHostAndPreservesTheInactiveTabWithoutIntermediateSelect() {
         val launched = ActivityScenario.launch(MainActivity::class.java)
         scenario = launched
         lateinit var originalActivity: MainActivity
@@ -138,8 +140,14 @@ class MainActivityDeepLinkRegressionTest {
         launched.onActivity { activity ->
             originalActivity = activity
             originalViewModel = ViewModelProvider(activity)[AppViewModel::class.java]
+            originalViewModel.dispatch(
+                com.shmakov.udf.navigation.TabAction.select(DemoTabGraph.cardsTabId),
+            )
         }
         val beforeFrame = originalViewModel.frames.value
+        val cardsBefore = checkNotNull(beforeFrame.state[DemoTabGraph.cardsTabId])
+        val oldAccountsIds = checkNotNull(beforeFrame.state[DemoTabGraph.accountsTabId])
+            .history.entries.map(BackStackEntry::id)
 
         launched.onActivity { activity ->
             activity.startActivity(
@@ -159,27 +167,22 @@ class MainActivityDeepLinkRegressionTest {
             currentViewModel = ViewModelProvider(activity)[AppViewModel::class.java]
         }
 
+        val afterFrame = currentViewModel.frames.value
         assertSame(originalActivity, currentActivity)
         assertSame(originalViewModel, currentViewModel)
-        assertEquals(beforeFrame.navigationRevision + 1L, currentViewModel.frames.value.navigationRevision)
+        assertEquals(beforeFrame.revision + 1L, afterFrame.revision)
+        assertTrue(afterFrame.transition is TabTransitionIntent.TabOpened)
+        assertEquals(DemoTabGraph.accountsTabId, afterFrame.state.selectedTabId)
+        assertSame(cardsBefore, afterFrame.state[DemoTabGraph.cardsTabId])
         assertTrue(
-            currentViewModel.frames.value.navigationTransition is
-                NavTransitionIntent.HistoryReplaced,
+            oldAccountsIds.toSet().intersect(
+                checkNotNull(afterFrame.state[DemoTabGraph.accountsTabId])
+                    .history.entries.map(BackStackEntry::id).toSet(),
+            ).isEmpty(),
         )
         assertEquals(CANONICAL_URI, currentActivity.intent.dataString)
-        assertTrue(
-            beforeFrame.appState.navState.entries.map(BackStackEntry::id).toSet()
-                .intersect(
-                    currentViewModel.frames.value.appState.navState.entries
-                        .map(BackStackEntry::id)
-                        .toSet(),
-                )
-                .isEmpty(),
-        )
 
-        // ActivityScenario does not observe DESTROYED after a same-instance onNewIntent on this
-        // API 29 device, even though the Activity is actually removed. Finish explicitly and
-        // assert the platform instance instead of letting close() report a false cleanup failure.
+        // ActivityScenario on API 29 can miss DESTROYED after same-instance onNewIntent.
         composeRule.runOnUiThread(currentActivity::finishAndRemoveTask)
         composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MILLIS) {
             currentActivity.isDestroyed
@@ -192,12 +195,13 @@ class MainActivityDeepLinkRegressionTest {
         Uri.parse(uri),
     ).addCategory(Intent.CATEGORY_BROWSABLE)
 
-    private fun expectedDeepLinkRoutes() =
-        listOf(Home, Accounts, Account(42), AccountDetails(42))
+    private fun expectedDeepLinkRoutes(): List<Route> =
+        listOf(Accounts, Account(42), AccountDetails(42))
 
     private fun waitForRoutes(viewModel: AppViewModel, expected: List<Route>) {
         composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MILLIS) {
-            viewModel.frames.value.appState.navState.entries.map(BackStackEntry::route) == expected
+            viewModel.frames.value.state[DemoTabGraph.accountsTabId]
+                ?.history?.entries?.map(BackStackEntry::route) == expected
         }
     }
 
@@ -221,12 +225,14 @@ class MainActivityDeepLinkRegressionTest {
         }
     }
 
+    private fun com.shmakov.udf.navigation.TabNavigationState.allEntryIds() =
+        tabs.flatMap { tab -> tab.history.entries.map(BackStackEntry::id) }
+
     private companion object {
         const val CANONICAL_URI = "udf-sandbox://accounts/42/details"
         const val DETAILS_SCREEN = "Account Details Screen #42"
         const val ACCOUNT_MODAL_CONTENT = "Go to details"
         const val ACCOUNTS_SCREEN = "Accounts Screen"
-        const val HOME_SCREEN = "Home Screen"
         const val UI_TIMEOUT_MILLIS = 5_000L
     }
 }

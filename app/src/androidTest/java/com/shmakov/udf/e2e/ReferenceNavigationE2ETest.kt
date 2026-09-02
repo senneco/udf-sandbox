@@ -40,14 +40,14 @@ class ReferenceNavigationE2ETest {
     private val robot by lazy { NavigationE2ERobot(composeRule) }
 
     @Before
-    fun startFromPortraitHome() {
+    fun startFromPortraitAccountsRoot() {
         robot.forcePortrait()
-        robot.returnDefaultFixtureToHome()
+        robot.returnDefaultFixtureToAccountsRoot()
     }
 
     @Test
-    fun homeAccountsSheetDetailsAndBackTraverseVisibleHistory() {
-        robot.openAccountOneSheetFromHome()
+    fun accountsSheetDetailsAndBackTraverseSelectedTabHistory() {
+        robot.openAccountOneSheet()
         robot.tap(GO_TO_DETAILS)
         robot.awaitVisible(ACCOUNT_ONE_DETAILS)
 
@@ -59,33 +59,27 @@ class ReferenceNavigationE2ETest {
         robot.awaitAbsent(GO_TO_ACCOUNT_TWO)
         robot.awaitVisible(ACCOUNTS_SCREEN)
 
-        robot.back()
-        robot.awaitAbsent(ACCOUNTS_SCREEN)
-        robot.awaitVisible(HOME_SCREEN)
     }
 
     @Test
-    fun sameHistoryReprojectsAcrossPortraitAndLandscape() {
-        robot.openAccountOneSheetFromHome()
+    fun sameSelectedTabHistorySurvivesPortraitAndLandscape() {
+        robot.openAccountOneSheet()
 
-        robot.awaitAbsent(HOME_SCREEN)
         robot.awaitVisible(ACCOUNTS_SCREEN)
         robot.awaitVisible(GO_TO_ACCOUNT_TWO)
 
         robot.forceLandscape()
-        robot.awaitVisible(HOME_SCREEN)
         robot.awaitVisible(ACCOUNTS_SCREEN)
         robot.awaitVisible(GO_TO_ACCOUNT_TWO)
 
         robot.forcePortrait()
-        robot.awaitAbsent(HOME_SCREEN)
         robot.awaitVisible(ACCOUNTS_SCREEN)
         robot.awaitVisible(GO_TO_ACCOUNT_TWO)
     }
 
     @Test
     fun rapidBackOnStackedSheetsDismissesOnlyCapturedTopSheet() {
-        robot.openAccountOneSheetFromHome()
+        robot.openAccountOneSheet()
         robot.tap(GO_TO_ACCOUNT_TWO)
         robot.awaitVisible(GO_TO_ACCOUNT_THREE)
 
@@ -100,7 +94,7 @@ class ReferenceNavigationE2ETest {
 
     @Test
     fun scrimDismissesSheetThroughTheApplicationBoundary() {
-        robot.openAccountOneSheetFromHome()
+        robot.openAccountOneSheet()
 
         robot.tapScrim()
 
@@ -110,7 +104,7 @@ class ReferenceNavigationE2ETest {
 
     @Test
     fun swipeDismissesSheetThroughTheApplicationBoundary() {
-        robot.openAccountOneSheetFromHome()
+        robot.openAccountOneSheet()
 
         robot.swipeSheetDown()
 
@@ -122,20 +116,14 @@ class ReferenceNavigationE2ETest {
 private class NavigationE2ERobot(
     private val rule: AndroidComposeTestRule<ActivityScenarioRule<MainActivity>, MainActivity>,
 ) {
-    fun returnDefaultFixtureToHome() {
+    fun returnDefaultFixtureToAccountsRoot() {
         awaitVisible(GO_TO_ACCOUNT_TWO)
         back()
         awaitAbsent(GO_TO_ACCOUNT_TWO)
         awaitVisible(ACCOUNTS_SCREEN)
-
-        back()
-        awaitAbsent(ACCOUNTS_SCREEN)
-        awaitVisible(HOME_SCREEN)
     }
 
-    fun openAccountOneSheetFromHome() {
-        awaitVisible(HOME_SCREEN)
-        tap(GO_TO_ACCOUNTS)
+    fun openAccountOneSheet() {
         awaitVisible(ACCOUNTS_SCREEN)
         tap(GO_TO_ACCOUNT_ONE)
         awaitVisible(GO_TO_ACCOUNT_TWO)
@@ -243,8 +231,6 @@ private class NavigationE2ERobot(
         )
 }
 
-private const val HOME_SCREEN = "Home Screen"
-private const val GO_TO_ACCOUNTS = "Go to Accounts"
 private const val ACCOUNTS_SCREEN = "Accounts Screen"
 private const val GO_TO_ACCOUNT_ONE = "Go to Account 1"
 private const val GO_TO_ACCOUNT_TWO = "Go to Account #2"
