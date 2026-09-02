@@ -125,24 +125,47 @@ internal object AccountDetailsDeepLinkHistoryFactory {
     fun create(
         target: AccountDetailsTarget,
         entryIdFactory: DeepLinkEntryIdFactory = FreshDeepLinkEntryIdFactory,
-    ): NavStateCreationResult {
-        val routes = listOf<Route>(
+    ): NavStateCreationResult = createHistory(
+        routes = listOf(
             Home,
             Accounts,
             Account(target.accountId),
             AccountDetails(target.accountId),
-        )
-        val entries = routes.map { route ->
-            BackStackEntry(
-                id = entryIdFactory.create(),
-                route = route,
-            )
-        }
+        ),
+        entryIdFactory = entryIdFactory,
+    )
+}
 
-        // Deep-link hydration deliberately shares the structural validation boundary used by
-        // snapshot restoration instead of constructing a privileged NavState.
-        return NavState.fromEntries(entries)
+/** Creates the complete leaf history used when the Accounts tab owns the deep link. */
+internal object AccountDetailsTabDeepLinkHistoryFactory {
+
+    fun create(
+        target: AccountDetailsTarget,
+        entryIdFactory: DeepLinkEntryIdFactory = FreshDeepLinkEntryIdFactory,
+    ): NavStateCreationResult = createHistory(
+        routes = listOf(
+            Accounts,
+            Account(target.accountId),
+            AccountDetails(target.accountId),
+        ),
+        entryIdFactory = entryIdFactory,
+    )
+}
+
+private fun createHistory(
+    routes: List<Route>,
+    entryIdFactory: DeepLinkEntryIdFactory,
+): NavStateCreationResult {
+    val entries = routes.map { route ->
+        BackStackEntry(
+            id = entryIdFactory.create(),
+            route = route,
+        )
     }
+
+    // Every hydration path deliberately shares the structural validation boundary used by
+    // snapshot restoration instead of constructing a privileged NavState.
+    return NavState.fromEntries(entries)
 }
 
 internal object FreshDeepLinkEntryIdFactory : DeepLinkEntryIdFactory {
@@ -178,6 +201,47 @@ internal sealed class DemoDeepLinkResolution {
     ) : DemoDeepLinkResolution()
 }
 
+/** Parse-and-normalize result shared by linear and tab-specific history factories. */
+internal sealed class DemoDeepLinkTargetResolution {
+    data class Resolved(
+        val deepLink: NormalizedDemoDeepLink,
+    ) : DemoDeepLinkTargetResolution()
+
+    data class NotHandled(
+        val reason: DemoDeepLinkNotHandledReason,
+    ) : DemoDeepLinkTargetResolution()
+
+    data class Rejected(
+        val problem: DemoDeepLinkResolutionProblem,
+    ) : DemoDeepLinkTargetResolution()
+}
+
+/** Pure URI parse and normalization boundary; history shape remains an application decision. */
+internal object DemoDeepLinkTargetResolver {
+
+    fun resolve(rawUri: String?): DemoDeepLinkTargetResolution {
+        val parsedUri = when (val parsing = DeepLinkUriParser.parse(rawUri)) {
+            is DeepLinkUriParseResult.Parsed -> parsing.uri
+            is DeepLinkUriParseResult.Rejected -> return DemoDeepLinkTargetResolution.Rejected(
+                DemoDeepLinkResolutionProblem.UriParsing(parsing.problem),
+            )
+        }
+
+        return when (val normalization = DemoDeepLinkNormalizer.normalize(parsedUri)) {
+            is DemoDeepLinkNormalizationResult.Normalized ->
+                DemoDeepLinkTargetResolution.Resolved(normalization.deepLink)
+
+            is DemoDeepLinkNormalizationResult.NotHandled ->
+                DemoDeepLinkTargetResolution.NotHandled(normalization.reason)
+
+            is DemoDeepLinkNormalizationResult.Rejected ->
+                DemoDeepLinkTargetResolution.Rejected(
+                    DemoDeepLinkResolutionProblem.Normalization(normalization.problem),
+                )
+        }
+    }
+}
+
 /** Pure parse -> normalize -> hydrate pipeline used by every Android entry point. */
 internal object DemoDeepLinkResolver {
 
@@ -185,22 +249,13 @@ internal object DemoDeepLinkResolver {
         rawUri: String?,
         entryIdFactory: DeepLinkEntryIdFactory = FreshDeepLinkEntryIdFactory,
     ): DemoDeepLinkResolution {
-        val parsedUri = when (val parsing = DeepLinkUriParser.parse(rawUri)) {
-            is DeepLinkUriParseResult.Parsed -> parsing.uri
-            is DeepLinkUriParseResult.Rejected -> return DemoDeepLinkResolution.Rejected(
-                DemoDeepLinkResolutionProblem.UriParsing(parsing.problem),
-            )
-        }
-
-        val normalized = when (val normalization = DemoDeepLinkNormalizer.normalize(parsedUri)) {
-            is DemoDeepLinkNormalizationResult.Normalized -> normalization.deepLink
-            is DemoDeepLinkNormalizationResult.NotHandled -> {
-                return DemoDeepLinkResolution.NotHandled(normalization.reason)
+        val normalized = when (val target = DemoDeepLinkTargetResolver.resolve(rawUri)) {
+            is DemoDeepLinkTargetResolution.Resolved -> target.deepLink
+            is DemoDeepLinkTargetResolution.NotHandled -> {
+                return DemoDeepLinkResolution.NotHandled(target.reason)
             }
-            is DemoDeepLinkNormalizationResult.Rejected -> {
-                return DemoDeepLinkResolution.Rejected(
-                    DemoDeepLinkResolutionProblem.Normalization(normalization.problem),
-                )
+            is DemoDeepLinkTargetResolution.Rejected -> {
+                return DemoDeepLinkResolution.Rejected(target.problem)
             }
         }
 

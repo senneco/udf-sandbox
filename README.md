@@ -49,7 +49,7 @@ flowchart LR
     UI -->|"анимация завершена"| Action
 ```
 
-Navigation core уже содержит валидируемую entry model, сохраняемое primitive-представление истории, typed `NavAction`, чистый `NavReducer` и чистую stack-to-layout projection. Activity-scoped `AppViewModel` владеет demo-specific `AppStore`, публикует immutable frames через read-only `StateFlow` и сериализует actions перед reducer. Compose наблюдает flow с учётом lifecycle, проецирует текущий state и передаёт renderer-у атомарный target с полным ordered membership той же history. Renderer автоматически привязывает saveable UI state к exact entry occurrence, использует отдельную чистую модель retained modal entries, а state-authoritative Material bridge разделяет пользовательский dismiss request и presentation completion.
+Navigation core уже содержит валидируемую entry model, сохраняемое primitive-представление истории, typed actions, чистые reducers и чистую stack-to-layout projection. Activity-scoped `AppViewModel` владеет ровно одним `TabNavigationStore`, публикует immutable graph frames через read-only `StateFlow` и сохраняет весь tab graph одним значением. Compose наблюдает flow с учётом lifecycle, выбирает активную leaf history и передаёт renderer-у атомарный target с graph-wide membership. Renderer автоматически привязывает saveable UI state к exact entry occurrence, использует отдельную чистую модель retained modal entries, а state-authoritative Material bridge разделяет пользовательский dismiss request и presentation completion.
 
 ## Текущее состояние
 
@@ -65,7 +65,7 @@ Navigation core уже содержит валидируемую entry model, с
 - typed push, pop, branch replacement, exact-ID modal dismiss и полную замену history;
 - чистый reducer с явными `Changed`/`Unchanged` outcomes;
 - transient transition intent, который не попадает в `NavState` или snapshot;
-- lifecycle-aware ViewModel и linearizable store как единственную demo-boundary для durable state;
+- lifecycle-aware ViewModel и linearizable tab-graph store как единственную boundary текущего demo host для durable state;
 - lifecycle-aware Compose collection и явные callbacks без глобальных state imports в UI;
 - чистую stack-to-layout projection с явной application-owned layout policy;
 - immutable root-, nested- и modal-слоты с exact-ID ownership modal layers;
@@ -84,7 +84,7 @@ Navigation core уже содержит валидируемую entry model, с
 - анимированные переходы между content;
 - state-authoritative закрытие bottom sheet с phase-scoped request/completion, retry прерванных Material mutations и exact-ID Back.
 
-Известные ограничения: store и `SavedStateHandle` adapter остаются внутренней demo-интеграцией, а Material bottom-sheet bridge построен поверх старой beta-версии Material 3. Core contracts проверяют persistence и восстановление на новом state owner; Android instrumentation отдельно проверяет Activity recreation, отсутствие восстановления retained presentation и `Bundle`/`Parcel` round trip в fresh owner. Presentation boundary также пока не стала согласованным library API: `Screen`/`ModalScreen` публичны, но destination catalog и renderer internal, а обязательность вызова `childContent` для screen-владельца вложенного slot не обеспечивается типами. Application-defined animation policy ещё отсутствует. Подробный baseline, ограничения и целевая архитектура описаны в [контексте проекта](docs/PROJECT_CONTEXT.md).
+Известные ограничения: store и `SavedStateHandle` adapter остаются внутренней demo-интеграцией, а Material bottom-sheet bridge построен поверх старой beta-версии Material 3. Android instrumentation проверяет Activity recreation, точное восстановление всего graph через настоящий `Bundle`/`Parcel` и отсутствие replay retained presentation, но реальный OS process kill пока не является device gate. Presentation boundary также пока не стала согласованным library API: `Screen`/`ModalScreen` публичны, но destination catalog и renderer internal, а обязательность вызова `childContent` для screen-владельца вложенного slot не обеспечивается типами. Application-defined animation policy ещё отсутствует. Подробный baseline, ограничения и целевая архитектура описаны в [контексте проекта](docs/PROJECT_CONTEXT.md).
 
 Базовая модель намеренно читается без framework-specific терминов:
 
@@ -218,8 +218,9 @@ Demo host связывает state, layout и presentation в одном нап�
 
 ```mermaid
 flowchart LR
-    Frame["AppStateFrame(state, revision, intent)"] --> Projector["NavProjector"]
-    Frame -->|"ordered historyEntryIds"| Target["NavigationRenderTarget(navigationRevision, historyEntryIds, tree, transitionIntent)"]
+    Frame["TabNavigationFrame(graph, revision, transition)"] --> Leaf["Selected leaf planner"]
+    Frame -->|"graph-wide entry IDs"| Target["NavigationRenderTarget(navigationRevision, historyEntryIds, tree, transitionIntent)"]
+    Leaf --> Projector["NavProjector"]
     Window["Window configuration"] --> Policy["Layout policy"]
     Policy --> Projector
     Projector --> Tree["NavigationRenderTree"]
@@ -349,13 +350,13 @@ Demo host поддерживает один намеренно узкий URI-к
 udf-sandbox://accounts/{positiveInt}/details
 ```
 
-Например, `udf-sandbox://accounts/42/details` атомарно создаёт логическую history:
+Например, `udf-sandbox://accounts/42/details` атомарно выбирает Accounts tab и заменяет только его leaf history:
 
 ```text
-Home -> Accounts -> Account(42) -> AccountDetails(42)
+Accounts -> Account(42) -> AccountDetails(42)
 ```
 
-Это не shortcut к leaf-экрану. В single- и expanded-layout исходная projection показывает `AccountDetails(42)` в root. Первый Back удаляет details и снова проецирует `Home -> Accounts -> Account(42)`: в portrait это `Accounts` с account sheet, в landscape — `Home`, вложенный `Accounts` и тот же sheet. Следующий Back отправляет exact-ID `DismissModal`, затем `Pop` возвращает `Home`.
+Это не shortcut к leaf-экрану. Один `TabAction.OpenTab` одновременно выбирает tab и устанавливает полную target history; другие tabs и их exact IDs не меняются. Первый Back удаляет details и возвращает account sheet, следующий закрывает sheet, а Back на Accounts root завершает host. На root любого non-primary tab Back сначала выбирает primary Accounts tab.
 
 Pipeline разделён по ответственности:
 
@@ -363,8 +364,8 @@ Pipeline разделён по ответственности:
 raw URI
   -> framework-free syntax parser
   -> demo normalization + typed target
-  -> validated four-entry NavState with fresh IDs
-  -> one ReplaceHistory through AppViewModel/AppStore
+  -> validated three-entry Accounts NavState with fresh IDs
+  -> one OpenTab through AppViewModel/TabNavigationStore
   -> projection + renderer
 ```
 
@@ -372,7 +373,7 @@ Scheme и host обязаны быть lowercase, как и в Android intent fi
 
 Hydration заканчивается обычным `NavState.fromEntries`, то есть проходит тот же structural validator, что snapshot restoration. Каждый новый deep-link event материализует свежие entry IDs, чтобы state предыдущего появления route не перетёк в новое.
 
-Cold `ACTION_VIEW` и warm `onNewIntent` вызывают один `AppViewModel.handleDeepLink`. Activity имеет `singleTop`; warm intent обновляет `activity.intent`, а cold intent обрабатывается до первой composition. При Activity recreation исходный launch intent не применяется повторно: восстановленные IDs и уже выполненный Back progress остаются каноническими.
+Cold `ACTION_VIEW` и warm `onNewIntent` вызывают один `AppViewModel.handleDeepLink`. Activity имеет `singleTop`; warm intent обновляет `activity.intent`, а cold intent обрабатывается до первой composition. При Activity recreation исходный launch intent не применяется повторно: выбранный tab, обе histories, восстановленные IDs и уже выполненный Back progress остаются каноническими.
 
 `NavTransitionIntent` существует только в `NavReduction.Changed`. Это описание совершившегося перехода для будущего renderer/animation policy, а не часть долгоживущего state:
 
@@ -391,7 +392,10 @@ when (val reduction = NavReducer.reduce(state, action)) {
 
 ## Lifecycle-aware host
 
-Demo host не является частью публичного navigation core. Он показывает минимальную Android-границу: `AppStore` атомарно публикует immutable `AppState`, process-local revision и transition metadata одним `AppStateFrame`, а `AppViewModel` удерживает store в lifecycle конкретной Activity.
+Demo host не является частью публичного navigation core. Он показывает минимальную Android-границу: `TabNavigationStore` атомарно публикует полный immutable graph, process-local revision и transition metadata одним `TabNavigationFrame`, а `AppViewModel` удерживает единственный store в lifecycle конкретной Activity.
+
+Все `Demo*` типы в следующем фрагменте — same-module fixtures и намеренно `internal`; это пример
+архитектурной границы приложения, а не уже опубликованный importable library API.
 
 ```kotlin
 private val appViewModel: AppViewModel by viewModels()
@@ -400,20 +404,17 @@ setContent {
     val frame by appViewModel.frames.collectAsStateWithLifecycle()
     val policy = selectPolicy(LocalConfiguration.current)
 
-    when (val result = NavProjector.project(frame.appState.navState, policy)) {
-        is NavProjectionResult.Success -> AnimatedNavigation(
-            renderTarget = NavigationRenderTarget(
-                navigationRevision = frame.navigationRevision,
-                historyEntryIds = frame.appState.navState.entries.map { it.id },
-                tree = result.tree,
-                transitionIntent = frame.navigationTransition,
-            ),
-            onNavigationAction = appViewModel::dispatch,
-        )
-        is NavProjectionResult.Failure -> showProjectionFailure(result.problem)
-    }
+    DemoTabNavigation(
+        frame = frame,
+        tabUiById = demoTabUi,
+        layoutPolicy = policy,
+        destinationCatalog = DemoDestinationCatalog,
+        onAction = appViewModel::dispatch,
+    )
 }
 ```
+
+`MainActivity` также переводит system Back в pure revision-guarded plan: exact Back внутри выбранной history, `Select` primary tab на non-primary root или host `finish` на primary root. Перед исполнением revision сверяется ещё раз, поэтому callback от уже устаревшей composition не может ни изменить новый graph, ни преждевременно завершить Activity. Logout/full reset передаёт заранее построенный целевой graph одним `replaceNavigationGraph(target)`/`ReplaceGraph`, без промежуточной смеси старых и новых tabs.
 
 `SavedNavigationStateStore` хранит под одним private key ровно одно атомарное значение `ArrayList<String>`. Versioned envelope содержит magic, версии envelope и snapshot, counts, точные entry IDs, route types и отсортированные пары route arguments. При чтении envelope сначала декодируется, затем проходит обычные `DemoRouteCodec` и `NavState.restore`, поэтому empty/non-content root, duplicate IDs, неизвестный route и устаревшая версия не обходят инварианты модели.
 
@@ -421,15 +422,15 @@ setContent {
 
 `TabNavigationStore` соединяет этот storage с `TabReducer` и read-only `StateFlow<TabNavigationFrame>`. При Missing/Rejected он выбирает один whole lazy fallback и сразу пытается записать его как canonical graph; exact restore выигрывает без создания fallback. В одном main-thread вызове Changed сначала сохраняет полный следующий graph и только затем публикует frame с `revision + 1` и exact transition. Typed save failure виден в dispatch result и не откатывает валидный in-memory state; Unchanged не пишет и сохраняет тот же frame instance. Dispatch не reentrant: reducer, codec и persistence callbacks обязаны завершиться до следующего action, поэтому nested callback не может перезаписать ещё не опубликованный frame. Store не выбирает primary tab, Back-at-root, deeplink, animation или error UI policy.
 
-`AppViewModel` восстанавливает history до создания store. Отсутствующий payload, повреждённый envelope и несовместимый snapshot приводят к полной fallback-history без частичного восстановления; stale value удаляется, а выбранная fallback-history немедленно записывается обратно как canonical payload. Валидный payload восстанавливает те же routes, arguments и entry IDs. И свежий, и восстановленный owner начинают с `AppStateFrame(revision = 0, intent = null)`: process-local revision, transition intent, retained modal state и animation progress не сохраняются.
+`AppViewModel` создаёт один tab store с одним codec и lazy whole-graph fallback factory. Отсутствующий payload, повреждённый envelope и несовместимый snapshot приводят к полной fallback graph без частичного восстановления; stale value удаляется, а fallback немедленно записывается как canonical payload. Валидный payload восстанавливает selected tab, порядок, все routes, arguments и entry IDs. Свежий owner из сохранённого payload начинает с `TabNavigationFrame(revision = 0, transition = null)`: process-local revision, transition, retained modal state и animation progress не сохраняются.
 
-`dispatch` всегда применяет action к последнему committed state под одной короткой критической секцией. Для `Changed` store вызывает persistence следующего `NavState` до публикации единого frame и увеличения revision; typed save failure не отменяет валидный in-memory transition, но не оставляет старый payload каноническим. `Unchanged` не пишет в `SavedStateHandle` и сохраняет тот же frame instance. Transition — process-local metadata текущего frame, sticky до следующего `Changed`; он не является pending event и не восстанавливается из snapshot. Поэтому initial/restored render, renderer/composition recreation, layout-only reprojection и пропуск промежуточного frame не переигрывают старый push, pop или dismiss.
+`dispatch` всегда применяет `TabAction` к последнему committed graph под одной короткой критической секцией. Для `Changed` store сохраняет весь следующий graph до публикации единого frame и увеличения revision; typed save failure не отменяет валидный in-memory transition. `Unchanged` не пишет в `SavedStateHandle` и сохраняет тот же frame instance. Transition — process-local metadata текущего frame, sticky до следующего `Changed`; он не является pending event и не восстанавливается из snapshot. Поэтому initial/restored render, renderer/composition recreation, layout-only reprojection и пропуск промежуточного frame не переигрывают старый leaf или container transition.
 
 Pure JVM contracts проверяют wire format, validation/fallback, save-before-publish и создание нового `AppViewModel` из скопированного primitive payload. Android instrumentation boundary отдельно проводит payload через настоящий `Bundle`/`Parcel`, создаёт fresh owner и проверяет Activity recreation, в том числе отсутствие resurrection у уже удалённой retained modal presentation. Это доказательство Activity lifecycle и simulated fresh-owner restoration wiring, а не альтернативный формат или второй источник navigation state.
 
 ## Карта кода
 
-- [`AppState.kt`](app/src/main/java/com/shmakov/udf/AppState.kt), [`AppStore.kt`](app/src/main/java/com/shmakov/udf/AppStore.kt) и [`AppViewModel.kt`](app/src/main/java/com/shmakov/udf/AppViewModel.kt) — immutable application state, persist-before-frame store и Activity-scoped lifecycle owner.
+- [`AppViewModel.kt`](app/src/main/java/com/shmakov/udf/AppViewModel.kt), [`DemoTabGraph.kt`](app/src/main/java/com/shmakov/udf/DemoTabGraph.kt) и [`DemoTabNavigationCoordinator.kt`](app/src/main/java/com/shmakov/udf/DemoTabNavigationCoordinator.kt) — Activity-scoped graph owner и чистые app-owned Back/deeplink policies. `AppState`/`AppStore` остаются linear-core fixtures.
 - [`NavigationSnapshotEnvelope.kt`](app/src/main/java/com/shmakov/udf/NavigationSnapshotEnvelope.kt) и [`SavedNavigationStateStore.kt`](app/src/main/java/com/shmakov/udf/SavedNavigationStateStore.kt) — one-key Bundle-safe wire format и typed `SavedStateHandle` restoration boundary.
 - [`TabNavigationSnapshotEnvelope.kt`](app/src/main/java/com/shmakov/udf/TabNavigationSnapshotEnvelope.kt) и [`SavedStateHandleTabNavigationStorage.kt`](app/src/main/java/com/shmakov/udf/SavedStateHandleTabNavigationStorage.kt) — отдельный one-key graph envelope и storage adapter без fallback/owner policy.
 - [`TabNavigationStore.kt`](app/src/main/java/com/shmakov/udf/TabNavigationStore.kt) — один main-thread graph owner, lazy startup recovery, typed persistence outcomes и process-local frames.

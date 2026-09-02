@@ -3,25 +3,28 @@ package com.shmakov.udf
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.shmakov.udf.composable.common.AnimatedNavigation
+import com.shmakov.udf.composable.common.DemoDestinationCatalog
 import com.shmakov.udf.composable.common.DemoNavigationLayoutPolicies
-import com.shmakov.udf.composable.common.NavigationProjectionFailure
-import com.shmakov.udf.navigation.NavAction
-import com.shmakov.udf.navigation.NavProjector
-import com.shmakov.udf.navigation.NavProjectionResult
-import com.shmakov.udf.navigation.NavTransitionIntent
+import com.shmakov.udf.composable.common.DemoTabNavigation
+import com.shmakov.udf.composable.common.DemoTabUi
+import com.shmakov.udf.navigation.TabAction
 import com.shmakov.udf.ui.theme.UDFTheme
 
 class MainActivity : ComponentActivity() {
@@ -30,31 +33,46 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // A recreated Activity restores the already hydrated state from its ViewModel. Replaying
-        // the original launch intent here would generate new entry IDs and reset Back progress.
+        // A recreated Activity keeps its already hydrated ViewModel. Replaying the original launch
+        // intent would create fresh entry IDs and overwrite the user's restored tab histories.
         if (savedInstanceState == null) {
             handleIntent(intent)
         }
 
         setContent {
             val frame by appViewModel.frames.collectAsStateWithLifecycle()
-            val backAction = AppBackActionPlanner.action(frame.appState.navState)
+            val backPlan = DemoTabBackPlanner.plan(
+                frame = frame,
+                primaryTabId = DemoTabGraph.primaryTabId,
+            )
 
-            BackHandler(enabled = backAction != null) {
-                backAction?.let(appViewModel::dispatch)
+            BackHandler {
+                when (
+                    val execution = DemoTabBackPlanner.resolve(
+                        plan = backPlan,
+                        currentRevision = appViewModel.frames.value.revision,
+                    )
+                ) {
+                    is DemoTabBackExecution.Dispatch -> appViewModel.dispatch(execution.action)
+                    DemoTabBackExecution.FinishHost -> finish()
+                    is DemoTabBackExecution.ConfigurationRejected -> Log.e(
+                        LOG_TAG,
+                        "Ignoring Back after invalid tab configuration: ${execution.problem}",
+                    )
+                    is DemoTabBackExecution.Stale -> Unit
+                }
             }
 
             UDFTheme {
-                // A surface container using the 'background' color from the theme
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                    color = MaterialTheme.colorScheme.background,
                 ) {
                     AppContent(
-                        appState = frame.appState,
-                        navigationRevision = frame.navigationRevision,
-                        navTransition = frame.navigationTransition,
-                        onNavigationAction = { action -> appViewModel.dispatch(action) },
+                        frame = frame,
+                        onNavigationAction = remember(appViewModel) {
+                            { action: TabAction -> appViewModel.dispatch(action) }
+                        },
                     )
                 }
             }
@@ -75,10 +93,8 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun AppContent(
-        appState: AppState,
-        navigationRevision: Long,
-        navTransition: NavTransitionIntent?,
-        onNavigationAction: (NavAction) -> Unit,
+        frame: TabNavigationFrame,
+        onNavigationAction: (TabAction) -> Unit,
     ) {
         val configuration = LocalConfiguration.current
         val layoutPolicy = if (
@@ -89,18 +105,27 @@ class MainActivity : ComponentActivity() {
             DemoNavigationLayoutPolicies.singlePane
         }
 
-        when (val projection = NavProjector.project(appState.navState, layoutPolicy)) {
-            is NavProjectionResult.Success -> AnimatedNavigation(
-                renderTarget = NavigationRenderTarget(
-                    navigationRevision = navigationRevision,
-                    historyEntryIds = appState.navState.entries.map { entry -> entry.id },
-                    tree = projection.tree,
-                    transitionIntent = navTransition,
-                ),
-                onNavigationAction = onNavigationAction,
-            )
+        DemoTabNavigation(
+            frame = frame,
+            tabUiById = demoTabUi,
+            layoutPolicy = layoutPolicy,
+            destinationCatalog = DemoDestinationCatalog,
+            onAction = onNavigationAction,
+        )
+    }
 
-            is NavProjectionResult.Failure -> NavigationProjectionFailure(projection.problem)
-        }
+    private companion object {
+        const val LOG_TAG = "UdfNavigation"
+
+        val demoTabUi = mapOf(
+            DemoTabGraph.accountsTabId to DemoTabUi(
+                labelRes = R.string.demo_tab_accounts,
+                icon = Icons.Default.AccountCircle,
+            ),
+            DemoTabGraph.cardsTabId to DemoTabUi(
+                labelRes = R.string.demo_tab_cards,
+                icon = Icons.Default.Star,
+            ),
+        )
     }
 }
